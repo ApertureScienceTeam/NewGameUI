@@ -232,6 +232,11 @@ public static class EngineBaseUI
     {
         s_progressError = error != 0;
         s_progressActive = false;
+        // 连接失败/被拒时引擎只给 StopProgressBar(bError)，不再补 LoadingFinished
+        // （实测 #GameUI_ServerConnectionTimeout、"LAN servers are restricted to local
+        // clients" 都是这条路径）。不在此收尾 s_loading，加载覆盖窗就永远收不掉。
+        if (s_progressError)
+            s_loading = false;
         s_secondaryActive = false;
         s_secondaryFraction = 0;
         s_progressSubStatus = "";
