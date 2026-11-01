@@ -20,6 +20,9 @@
 		<SolidColorBrush x:Key="ConsoleTitleBrush" Color="#1C2631" />
 		<SolidColorBrush x:Key="ConsoleTitleTextBrush" Color="#C9D6E2" />
 		<SolidColorBrush x:Key="ConsoleHintBrush" Color="#7F92A5" />
+		<!-- 选中色：Fluent 默认是强调色 + 反色文字，在深底控制台上看不清，固定成蓝灰底白字 -->
+		<SolidColorBrush x:Key="ConsoleSelectionBrush" Color="#3D6382" />
+		<SolidColorBrush x:Key="ConsoleSelectionTextBrush" Color="#FFFFFF" />
 	</Window.Resources>
 
 	<Window.Styles>
@@ -52,9 +55,18 @@
 					              HorizontalScrollBarVisibility="Auto"
 					              VerticalScrollBarVisibility="Auto"
 					              Padding="6,4">
-						<TextBlock x:Name="HistoryText" TextWrapping="NoWrap"
-						           FontFamily="Consolas, Courier New" FontSize="12"
-						           Foreground="{StaticResource ConsolePrintBrush}" />
+						<!-- 可选中/复制：Avalonia 12 里 IsTextSelectable 已拆成独立控件。
+					     keycapture 不是样式类而是按键路由开关：接入层按"聚焦控件是不是
+					     TextBox/keycapture"决定要不要抓取键盘（HostedWindow.OnFocusChanged）。
+					     点历史区会把这个块设为焦点，没有这个类就松开抓取，按键改走引擎
+					     Key_Event -> RouteMenuKey，那里引擎的 keynum（'c'=99）被当虚拟键查表，
+					     Ctrl+C 就变成 NumPad3，窗口层的 Ctrl+C 判断永远不成立 -->
+						<SelectableTextBlock x:Name="HistoryText" Classes="keycapture"
+						                     TextWrapping="NoWrap"
+						                     FontFamily="Consolas, Courier New" FontSize="12"
+						                     Foreground="{StaticResource ConsolePrintBrush}"
+						                     SelectionBrush="{StaticResource ConsoleSelectionBrush}"
+						                     SelectionForegroundBrush="{StaticResource ConsoleSelectionTextBrush}" />
 					</ScrollViewer>
 				</Border>
 

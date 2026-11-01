@@ -4,6 +4,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Documents;
 using Avalonia.Input;
+using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Threading;
@@ -62,6 +63,12 @@ public partial class ConsoleWindow : Window
         ConsoleService.LineAdded += OnLineAdded;
         ConsoleService.Cleared += OnCleared;
         EngineConsole.VisibilityChanged += OnVisibilityChanged;
+        // 复制走窗口层：hosted 窗口里点历史文字不保证把键盘焦点从输入行移走，
+        // 挂在 SelectableTextBlock 自身按键处理上的 Ctrl+C 就收不到。
+        // handledEventsToo：控件自己的处理会把按下/按键事件标成已处理，普通挂接收不到
+        AddHandler(KeyDownEvent, OnCopyShortcut, RoutingStrategies.Tunnel, handledEventsToo: true);
+        HistoryText.AddHandler(PointerPressedEvent, OnHistoryPointerPressed,
+            RoutingStrategies.Bubble, handledEventsToo: true);
         Closed += (_, _) =>
         {
             ConsoleService.LineAdded -= OnLineAdded;
@@ -162,6 +169,55 @@ public partial class ConsoleWindow : Window
             {
             }
         }, DispatcherPriority.Background);
+    }
+
+    // ==================== 复制选中文字 ====================
+
+    /// <summary>
+    /// Ctrl+C 复制历史选区。放在窗口层而不是依赖 SelectableTextBlock 自身：
+    /// hosted 窗口里点历史文字不保证把键盘焦点从输入行移走，控件级按键处理就收不到
+    /// </summary>
+    void OnCopyShortcut(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.C || (e.KeyModifiers & KeyModifiers.Control) == 0)
+            return;
+        if (TryCopyHistory())
+            e.Handled = true;
+    }
+
+    /// <summary>右键历史区同样复制（原版 vgui 控制台的习惯），与 Ctrl+C 共用一条复制路径</summary>
+    void OnHistoryPointerPressed(object? sender, PointerPressedEventArgs e)
+    {
+        if (e.GetCurrentPoint(HistoryText).Properties.IsRightButtonPressed && TryCopyHistory())
+            e.Handled = true;
+    }
+
+    /// <summary>复制历史选区。输入行自身有选区时让给 TextBox 处理</summary>
+    bool TryCopyHistory()
+    {
+        var text = HistoryText.SelectedText;
+        if (text.Length == 0 || Entry.SelectionStart != Entry.SelectionEnd)
+            return false;
+
+        CopyToClipboard(text);
+        return true;
+    }
+
+    async void CopyToClipboard(string text)
+    {
+        var clipboard = TopLevel.GetTopLevel(HistoryText)?.Clipboard;
+        if (clipboard != null)
+        {
+            try
+            {
+                await clipboard.SetTextAsync(text);
+            }
+            catch
+            {
+            }
+        }
+        // 点选可能把焦点带到历史区，复制完还给输入行
+        Entry.Focus();
     }
 
     // ==================== 显隐 ====================
