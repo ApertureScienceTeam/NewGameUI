@@ -537,7 +537,7 @@ public static unsafe class EngineHooks
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvThiscall)])]
     public static void Paint(IntPtr obj, int x, int y, int right, int bottom)
     {
-        // 解锁光标 + 记录 GL 基线 + 同步渲染尺寸由接入层负责
+        // 记录 GL 基线 + 同步渲染尺寸 + 按需解锁光标由接入层负责
         GoldSrcAvalonia.BeginFrame();
         // 同样是 reverse P/Invoke 边界：Avalonia 侧的绘制/输入异常不能冒回引擎
         try
