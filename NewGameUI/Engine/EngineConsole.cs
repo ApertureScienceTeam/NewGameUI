@@ -34,8 +34,78 @@ public static unsafe class EngineConsole
     static delegate* unmanaged[Cdecl]<IntPtr, sbyte*, sbyte*, void> s_pfnPrintf;
     static delegate* unmanaged[Cdecl]<IntPtr, sbyte*, sbyte*, void> s_pfnDPrintf;
 
-    /// <summary>系统 ANSI 代码页（中文系统 = GBK/936）：GoldSrc 控制台字符串是 ANSI</summary>
+    /// <summary>系统 ANSI 代码页（中文系统 = GBK/936）：GoldSrc 引擎自身的控制台字符串是 ANSI</summary>
     internal static readonly Encoding Ansi = CreateAnsiEncoding();
+
+    static bool s_loggedUtf8;
+
+    /// <summary>
+    /// 控制台文本解码。引擎自身的输出（含中文本地化）是系统 ANSI，但 AMXX 这类插件
+    /// 把 lang 文件里的字节原样打印出来——cstrike\addons\amxmodx\data\lang\*.txt
+    /// 实测是 UTF-8（同一段字节按 GBK 解直接是非法多字节序列），按 ANSI 解就成了乱码。
+    /// 判据取"整段含高位字节且是合法 UTF-8"：中文 GBK 串几乎必然含非法 UTF-8 序列，
+    /// 落回 ANSI；纯 ASCII 走哪条都一样。
+    /// </summary>
+    static string DecodeText(sbyte* p)
+    {
+        if (p == null)
+            return "";
+        int len = 0;
+        while (p[len] != 0)
+            len++;
+        if (len == 0)
+            return "";
+
+        var bytes = new ReadOnlySpan<byte>((byte*)p, len);
+        if (IsUtf8(bytes))
+        {
+            if (!s_loggedUtf8)
+            {
+                s_loggedUtf8 = true;
+                Log.Write("EngineConsole: 输出是 UTF-8（AMXX 等插件），已按 UTF-8 解码");
+            }
+            return Encoding.UTF8.GetString(bytes);
+        }
+        return Ansi.GetString(bytes);
+    }
+
+    /// <summary>含高位字节、且整段是合法 UTF-8（拒绝 overlong、代理区与超范围码位）</summary>
+    static bool IsUtf8(ReadOnlySpan<byte> b)
+    {
+        var asciiOnly = true;
+        for (int i = 0; i < b.Length; i++)
+        {
+            byte c = b[i];
+            if (c < 0x80)
+                continue;
+            asciiOnly = false;
+
+            int extra = c switch
+            {
+                >= 0xC2 and <= 0xDF => 1,
+                >= 0xE0 and <= 0xEF => 2,
+                >= 0xF0 and <= 0xF4 => 3,
+                _ => -1,
+            };
+            if (extra < 0 || i + extra >= b.Length)
+                return false;
+            for (int k = 1; k <= extra; k++)
+                if ((b[i + k] & 0xC0) != 0x80)
+                    return false;
+
+            if (c == 0xE0 && (b[i + 1] < 0xA0 || b[i + 1] > 0xBF))
+                return false;
+            if (c == 0xED && (b[i + 1] < 0x80 || b[i + 1] > 0x9F))
+                return false;
+            if (c == 0xF0 && (b[i + 1] < 0x90 || b[i + 1] > 0xBF))
+                return false;
+            if (c == 0xF4 && b[i + 1] > 0x8F)
+                return false;
+
+            i += extra;
+        }
+        return !asciiOnly;
+    }
 
     static Encoding CreateAnsiEncoding()
     {
@@ -310,11 +380,11 @@ public static unsafe class EngineConsole
             LineAdded?.Invoke(new ConsoleLine(parts[i], dev));
     }
 
-    // ==================== 格式化（ANSI + 单参数） ====================
+    // ==================== 格式化（UTF-8 / ANSI + 单参数） ====================
 
     static string FormatText(sbyte* format, sbyte* arg0)
     {
-        var fmt = DecodeAnsi(format);
+        var fmt = DecodeText(format);
         return TrySubstitute(fmt, arg0, out var result) ? result : fmt;
     }
 
@@ -387,7 +457,7 @@ public static unsafe class EngineConsole
         switch (conv)
         {
             case 's':
-                value = arg0 == null ? "(null)" : DecodeAnsi(arg0);
+                value = arg0 == null ? "(null)" : DecodeText(arg0);
                 break;
             case 'd':
             case 'i':
@@ -447,16 +517,6 @@ public static unsafe class EngineConsole
 
         result = fmt[..specStart] + value + fmt[(specEnd + 1)..];
         return true;
-    }
-
-    static string DecodeAnsi(sbyte* p)
-    {
-        if (p == null)
-            return "";
-        int len = 0;
-        while (p[len] != 0)
-            len++;
-        return len == 0 ? "" : Ansi.GetString((byte*)p, len);
     }
 
     /// <summary>插件卸载时解绑状态（面板对象由引擎持有，进程即将退出，不再还原）</summary>
