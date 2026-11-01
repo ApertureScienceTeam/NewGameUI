@@ -2,8 +2,10 @@
 
 用 Avalonia（Blazonia / Razor 页面）重做的 Counter-Strike 1.6 客户端 UI，经 **MetaHook** 注入引擎，
 以 **32 位 NativeAOT** 原生 DLL 形式运行，游戏机不需要安装 .NET 运行时。
-引擎接入层与 OpenGL2 平台后端在 [GoldSrc.Avalonia](https://github.com/ApertureScienceTeam/GoldSrc.Avalonia)，
-当前以本机绝对路径引用，待其发布 NuGet 包后切换为包引用。
+引擎接入层与 OpenGL2 平台后端以 NuGet 包引用：
+[GoldSrc.Avalonia](https://www.nuget.org/packages/GoldSrc.Avalonia)（源码与发布流水线见
+[ApertureScienceTeam/GoldSrc.Avalonia](https://github.com/ApertureScienceTeam/GoldSrc.Avalonia)），
+版本随其 Pack workflow 发布推进，升级改 csproj 里的 `PackageReference` 版本即可。
 
 | 目录 | 作用 |
 |---|---|
@@ -55,8 +57,8 @@ dotnet restore NewGameUI.slnx
 - NuGet 还原需要访问 nuget.org（含 `Blazonia 12.0.0-preview1.3` 预览包）。
 - 报 `NETSDK1045` / 找不到 `net10.0`：SDK 太老。
 - 发布报找不到 `link.exe`：VS 安装器里补上 C++ 桌面开发工作负载。
-- 首次拉取后如果 `GoldSrc.Avalonia` 引用报错：确认 `NewGameUI.csproj` 里
-  `GoldSrcAvaloniaDir` 指向的本机路径存在（默认 `D:\workspace\GoldSrc.Avalonia`）。
+- `GoldSrc.Avalonia` 还原失败：确认 csproj 里的版本号已在 nuget.org 上
+  （本地开发要临时改库源码时，可换成对仓库的 `ProjectReference`）。
 
 ---
 

@@ -14,12 +14,6 @@
 		<PublishAot>true</PublishAot>
 	</PropertyGroup>
 
-	<!-- GoldSrc.Avalonia 尚未发布到 NuGet，先引用本机仓库绝对路径；发布后删除该属性与
-	     下面的 ProjectReference，改用注释里的 PackageReference（版本随发布更新） -->
-	<PropertyGroup>
-		<GoldSrcAvaloniaDir>D:\workspace\GoldSrc.Avalonia</GoldSrcAvaloniaDir>
-	</PropertyGroup>
-
 	<ItemGroup>
 		<PackageReference Include="Avalonia" Version="12.1.4" />
 		<PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
@@ -29,8 +23,9 @@
 		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
 		<PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
 		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
-		<ProjectReference Include="$(GoldSrcAvaloniaDir)\GoldSrc.Avalonia\GoldSrc.Avalonia.csproj" />
-		<!-- <PackageReference Include="GoldSrc.Avalonia" Version="0.1.0" /> -->
+		<!-- GoldSrc.Avalonia 版本由 Pack workflow 发布推进（MinVer 从 tag 推导）；
+		     改引用版本时同步看 https://www.nuget.org/packages/GoldSrc.Avalonia -->
+		<PackageReference Include="GoldSrc.Avalonia" Version="0.1.1-alpha.0.1" />
 	</ItemGroup>
 
 	<ItemGroup>
