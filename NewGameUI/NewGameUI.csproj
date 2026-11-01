@@ -51,10 +51,6 @@
 		<TrimmerRootDescriptor Include=".\TrimmerRoots.xml" />
 	</ItemGroup>
 	
-	<ItemGroup>
-	  <Folder Include="Properties\PublishProfiles\" />
-	</ItemGroup>
-	
 	<!-- Build 之后自动 Publish（AOT 产物才会落到插件目录）。
 	     内层 Publish 会再触发 Build，必须用独立全局属性把递归掐断，
 	     否则 MSBuild 报 MSB4006“目标依赖项关系图中存在循环依赖项”，
