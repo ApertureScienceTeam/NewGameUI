@@ -1,0 +1,371 @@
+@* 新建游戏表单：复刻原版 CS 1.6 的新建游戏对话框。
+   cstrike\resource\GameMenu.res 里 "New Game" 的命令是 OpenCreateMultiplayerGameDialog，
+   即 GameUI.dll 的 CCreateMultiplayerGameDialog，只有两页：
+   - 服务器（#GameUI_Server）：Resource/CreateMultiplayerGameServerPage.res。
+     MapList 下拉 + 服务器名称 / 服务器密码 / 最大玩家数量 / Enable Steam Networking；
+     res 里的 EnableBotsCheck、BotQuotaCombo、SkillLevel* 在 cstrike 中都是 visible=0，
+     所以界面上根本不出现（那些控件是给 CZ 的 res 打开用的）。
+   - 游戏（#GameUI_Game）：settings.scr 的 DESCRIPTION SERVER_OPTIONS，按文件顺序生成
+     除前三项（hostname/maxplayers/sv_password，已在服务器页）之外的 15 项。
+   原版没有 Bot 页：GameUI.dll 用 _stricmp(ModData 的 game 标题, "Condition Zero") 判断，
+   只有 CZ 才 new CCreateMultiplayerGameBotPage 并 AddPage("BotPage" / #GameUI_CPUPlayerOptions)，
+   CS 1.6（game "Counter-Strike"）直接跳过（0x1001ED3E jne 0x1001ED89）。
+   控件类型按原版语义：STRING→文本框、NUMBER 有界→滑条、NUMBER 无界（-1 上限）→数字框、
+   BOOL→复选框、LIST→下拉。文案取自 cstrike_schinese / gameui_schinese 的官方译文。
+   启动时按原版流程下发：引擎侧参数（maxplayers/hostname/sv_password/sv_lan）→ map 开局 →
+   两个 wait（0x1F488 原版同款）→ mp_*（mp.dll 随服务器才加载，提前下发会被当 unknown 丢弃）。
+   记忆机制（反汇编确认）：原版对话框进程内常驻（首次打开 new，之后只重新激活），
+   且开局时把控件值整文件重写回 settings.scr（文件头自述 "stores last settings chosen,
+   too"；引擎不持久化这些值——hostname/mp_* 均非 FCVAR_ARCHIVE 不进 config.cfg），
+   下次创建对话框时按条目回读。这里用 settings.scr 往返（SettingsScr）+ 进程内
+   static 等价实现，与原版互认同一个文件。
+   地图：原版 CS 1.6 不跨重启保存（唯一写 CSBotConfig.vdf "map" 的是 CZ 分支），
+   这里补上写侧——开局时把 map 写进 cstrike\CSBotConfig.vdf（BotConfigVdf），
+   正好复活的是原版构造函数里自己的恢复路径（0x1EEECC 读 "map" 键），原版 UI 可直接读回。
+   随机地图：原版下拉第一项是 #GameUI_RandomMap（"< Random Map >"），Start 时
+   ServerPage::GetMapString（0x206B0）检测到该选中项就在真实地图里均匀随机取一张，
+   选中态本身不变（常驻对话框继续显示随机地图）；本表单同款实现。 *@
+<Border Background="@("#161D26")" CornerRadius="12"
+        BorderBrush="@("#2A3644")" BorderThickness="1"
+        Padding="@("20,12")" Margin="20">
+	<Grid RowDefinitions="@("*,Auto")">
+		<TabControl Grid.Row="0" T="TabItem" Margin="@("0,4,0,0")">
+
+			<TabItem Header="@("服务器")">
+				<ScrollViewer>
+					<StackPanel Spacing="12" Margin="@("16,16")">
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="地图" Width="120" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<ComboBox T="string" ItemsSource="@_mapChoices" OnSelectionChanged="OnMapSelected"
+							          SelectedIndex="@_mapIndex" Width="360" MaxDropDownHeight="300" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="服务器名称" Width="120" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_hostname" Width="320" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="服务器密码" Width="120" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_password" Width="320" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="最大玩家数量" Width="120" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="1" Maximum="32" Width="220" @bind-Value="_maxPlayers" />
+							<TextBlock Text="@MaxPlayersText" Width="32" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+
+						@* 原版是单个 CheckButton（labelText = #Valve_Enable_SteamNetworking），无独立标签 *@
+						<CheckBox @bind-IsChecked="_steamNetworking">Enable Steam Networking</CheckBox>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+			<TabItem Header="@("游戏")">
+				<ScrollViewer>
+					<StackPanel Spacing="12" Margin="@("16,16")">
+						@* 顺序与 settings.scr 的 DESCRIPTION SERVER_OPTIONS 完全一致；
+						   hostname / maxplayers / sv_password 三项已在服务器页，这里不重复 *@
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="每张地图时间 (分钟)" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_timelimit" Width="100" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="获胜限制 (局)" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_winlimit" Width="100" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="局数限制 (局)" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_maxrounds" Width="100" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="每一局的时间 (分钟)" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="0" Maximum="15" Width="220" @bind-Value="_roundtime" />
+							<TextBlock Text="@RoundTimeText" Width="32" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="静止时间 (秒)" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="0" Maximum="60" Width="220" @bind-Value="_freezetime" />
+							<TextBlock Text="@FreezeTimeText" Width="32" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="购买时间 (分钟)" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_buytime" Width="100" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="起始金钱" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="800" Maximum="16000" Width="220" @bind-Value="_startmoney" />
+							<TextBlock Text="@StartMoneyText" Width="52" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+
+						<CheckBox @bind-IsChecked="_footsteps">脚步</CheckBox>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="死亡视角模式" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<ComboBox T="string" ItemsSource="@CameraLabels" OnSelectionChanged="OnCameraSelected"
+							          SelectedIndex="@_cameraIndex" Width="260" />
+						</StackPanel>
+
+						<CheckBox @bind-IsChecked="_fadetoblack">禁用追逐/死亡视角</CheckBox>
+						<CheckBox @bind-IsChecked="_friendlyFire">是否能够伤害</CheckBox>
+						<CheckBox @bind-IsChecked="_tkpunish">在下一局中杀死团队杀手</CheckBox>
+						<CheckBox @bind-IsChecked="_autokick">踢出懒惰者和团队杀手</CheckBox>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="踢出杀死(x)个人质的玩家" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_hostagepenalty" Width="100" />
+						</StackPanel>
+
+						<CheckBox @bind-IsChecked="_flashlight">允许手电筒</CheckBox>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+		</TabControl>
+
+		<StackPanel Grid.Row="1" Orientation="Orientation.Horizontal"
+		            HorizontalAlignment="HorizontalAlignment.Right" Margin="12">
+			<Button OnClick="Start" Width="110" Height="34"
+			        Background="@("#4FA3E3")" Foreground="@("#0B1016")">开始</Button>
+		</StackPanel>
+	</Grid>
+</Border>
+
+@code {
+	// —— 地图 ——
+	// ImmutableArray 走 Blazonia 的 IImmutableList 直接赋值路径（ItemsSource 在具名参数
+	// 阶段先于 SelectedIndex 应用）；List 会走 ObservableCollection 包装、渲染阶段才应用，
+	// 导致 SelectedIndex 先写入被清空、下拉框显示为空
+	// _maps 为真实地图；_mapChoices 是下拉项：第一项"< 随机地图 >"（原版 #GameUI_RandomMap，
+	// "< Random Map >"，恒为第 0 项）+ 真实地图
+	const string RandomMapChoice = "< 随机地图 >";
+	ImmutableArray<string> _maps = ImmutableArray<string>.Empty;
+	ImmutableArray<string> _mapChoices = ImmutableArray<string>.Empty;
+	string? _selectedMap;
+	int _mapIndex;
+
+	// 与原版一致：CreateMultiplayerGameDialog 进程内只创建一次（之后只重新激活），
+	// 地图下拉因此记住上次选择（可能就是"随机地图"这一项）；settings.scr 不存地图，
+	// 用进程内 static 等价实现
+	static string? s_lastMap;
+
+	// —— 服务器（Server 页）——
+	string _hostname = "Counter-Strike Server";
+	string _password = "";
+	double? _maxPlayers = 16;
+	bool? _steamNetworking = true;
+
+	// —— 游戏选项（settings.scr / DESCRIPTION SERVER_OPTIONS 顺序）——
+	string _timelimit = "20";
+	string _winlimit = "0";
+	string _maxrounds = "0";
+	double? _roundtime = 5;
+	double? _freezetime = 6;
+	string _buytime = "1.5";
+	double? _startmoney = 800;
+	bool? _footsteps = true;
+	int _cameraIndex;
+	bool? _fadetoblack = false;
+	bool? _friendlyFire = false;
+	bool? _tkpunish = true;
+	bool? _autokick = false;
+	string _hostagepenalty = "5";
+	bool? _flashlight = false;
+
+	// LIST 项文案取自 settings.scr 的 token（#Cstrike_Spectate_Anyone 等）官方简体中文
+	static readonly ImmutableArray<string> CameraLabels =
+		new[] { "所有人观看", "只分组观看", "只允许第一人称视角" }.ToImmutableArray();
+
+	string MaxPlayersText => ((int)Math.Round(_maxPlayers ?? 16)).ToString();
+	string RoundTimeText => ((int)Math.Round(_roundtime ?? 5)).ToString();
+	string FreezeTimeText => ((int)Math.Round(_freezetime ?? 6)).ToString();
+	string StartMoneyText => ((int)Math.Round(_startmoney ?? 800)).ToString();
+
+	protected override void OnInitialized()
+	{
+		LoadMaps();
+		// 与原版一致：控件初值取 settings.scr 存储的上次设置（原版对话框创建时按条目回读；
+		// 引擎不持久化 hostname/mp_*——均非 FCVAR_ARCHIVE 不进 config.cfg，也不写 game.cfg，
+		// settings.scr 是唯一跨重启存储）。主菜单阶段 mp.dll 未加载、mp_* cvar 不存在，
+		// cvar 读取只能作为已开局时的候选，排在 settings.scr 之后
+		_hostname = SettingsScr.GetValue("hostname") ?? EngineCommands.GetCvarString("hostname", "Counter-Strike Server");
+		_password = SettingsScr.GetValue("sv_password") ?? EngineCommands.GetCvarString("sv_password");
+		_maxPlayers = ScrFloat("maxplayers", EngineCommands.GetCvarFloat("maxplayers", 16));
+		if (_maxPlayers < 1 || _maxPlayers > 32)
+			_maxPlayers = 16;
+		_steamNetworking = EngineCommands.GetCvarFloat("sv_use_steam_networking", 1) != 0;
+		_timelimit = NumText(ScrFloat("mp_timelimit", EngineCommands.GetCvarFloat("mp_timelimit", 20)));
+		_winlimit = NumText(ScrFloat("mp_winlimit", EngineCommands.GetCvarFloat("mp_winlimit", 0)));
+		_maxrounds = NumText(ScrFloat("mp_maxrounds", EngineCommands.GetCvarFloat("mp_maxrounds", 0)));
+		_roundtime = Clamp(ScrFloat("mp_roundtime", EngineCommands.GetCvarFloat("mp_roundtime", 5)), 0, 15);
+		_freezetime = Clamp(ScrFloat("mp_freezetime", EngineCommands.GetCvarFloat("mp_freezetime", 6)), 0, 60);
+		_buytime = NumText(ScrFloat("mp_buytime", EngineCommands.GetCvarFloat("mp_buytime", 1.5f)));
+		_startmoney = Clamp(ScrFloat("mp_startmoney", EngineCommands.GetCvarFloat("mp_startmoney", 800)), 800, 16000);
+		_footsteps = ScrFloat("mp_footsteps", EngineCommands.GetCvarFloat("mp_footsteps", 1)) != 0;
+		_cameraIndex = (int)Clamp(ScrFloat("mp_forcecamera", EngineCommands.GetCvarFloat("mp_forcecamera", 0)), 0, 2);
+		_fadetoblack = ScrFloat("mp_fadetoblack", EngineCommands.GetCvarFloat("mp_fadetoblack", 0)) != 0;
+		_friendlyFire = ScrFloat("mp_friendlyfire", EngineCommands.GetCvarFloat("mp_friendlyfire", 0)) != 0;
+		_tkpunish = ScrFloat("mp_tkpunish", EngineCommands.GetCvarFloat("mp_tkpunish", 1)) != 0;
+		_autokick = ScrFloat("mp_autokick", EngineCommands.GetCvarFloat("mp_autokick", 0)) != 0;
+		_hostagepenalty = NumText(ScrFloat("mp_hostagepenalty", EngineCommands.GetCvarFloat("mp_hostagepenalty", 5)));
+		_flashlight = ScrFloat("mp_flashlight", EngineCommands.GetCvarFloat("mp_flashlight", 0)) != 0;
+	}
+
+	/// <summary>settings.scr 存储值解析（原版对话框 Game 页的初值来源）；缺失/非法时用回退值</summary>
+	static float ScrFloat(string cvar, float fallback)
+	{
+		var s = SettingsScr.GetValue(cvar);
+		return s != null
+			&& float.TryParse(s, System.Globalization.NumberStyles.Float,
+				System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
+	}
+
+	static string NumText(float v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+	static double Clamp(float v, double min, double max) => Math.Min(max, Math.Max(min, v));
+	static float ParseNum(string? s, float fallback) =>
+		float.TryParse(s, System.Globalization.NumberStyles.Float,
+			System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : fallback;
+
+	/// <summary>枚举 mod 目录下 maps\*.bsp（地图名去掉扩展名，按名称排序）</summary>
+	void LoadMaps()
+	{
+		try
+		{
+			var gameDir = EngineCommands.GetGameDirectory();
+			if (gameDir == null)
+				return;
+			var list = Directory.GetFiles(Path.Combine(gameDir, "maps"), "*.bsp")
+				.Select(Path.GetFileNameWithoutExtension)
+				.Where(n => !string.IsNullOrEmpty(n))
+				.Select(n => n!)
+				.OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+				.ToList();
+			_maps = list.ToImmutableArray();
+			_mapChoices = new[] { RandomMapChoice }.Concat(_maps).ToImmutableArray();
+			// 恢复上次地图：本进程内上次选中的（等价原版常驻对话框）→ CSBotConfig.vdf
+			// 里的跨重启记忆（原版 CZ 同款文件/键名）；都没有、或那张图已不在列表时
+			// 回到"< 随机地图 >"——原版下拉的默认选中项就是第 0 项随机地图
+			_selectedMap ??= s_lastMap;
+			_selectedMap ??= BotConfigVdf.GetValue("map");
+			_mapIndex = _selectedMap is { } m && m != RandomMapChoice
+				? _mapChoices.IndexOf(m, StringComparer.OrdinalIgnoreCase)
+				: 0;
+			if (_mapIndex < 0)
+				_mapIndex = 0;
+			_selectedMap = _mapChoices[_mapIndex];
+		}
+		catch (Exception ex)
+		{
+			// 地图目录枚举失败不影响窗口其余功能
+			GoldSrcAvalonia.Log?.Invoke($"NewGameForm.LoadMaps failed: {ex.Message}");
+		}
+	}
+
+	void OnMapSelected(Avalonia.Controls.SelectionChangedEventArgs e)
+	{
+		_selectedMap = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+	}
+
+	void OnCameraSelected(Avalonia.Controls.SelectionChangedEventArgs e)
+	{
+		var s = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+		var i = s == null ? -1 : CameraLabels.IndexOf(s, StringComparer.Ordinal);
+		if (i >= 0)
+			_cameraIndex = i;
+	}
+
+	void Start()
+	{
+		// 没有任何真实地图时原版 GetMapString 返回 NULL，这里同样不动作
+		if (_maps.Length == 0)
+			return;
+		// 与原版一致（ServerPage::GetMapString @0x206B0）：选中"< 随机地图 >"时
+		// 在真实地图里均匀随机取一张，选中态本身保持随机地图
+		var map = _selectedMap == RandomMapChoice
+			? _maps[Random.Shared.Next(_maps.Length)]
+			: _selectedMap;
+		if (string.IsNullOrWhiteSpace(map))
+			return;
+
+		// 与原版一致（组合命令 @0x98010）：引擎侧参数先发、map 收尾。
+		// maxplayers/hostname/sv_password/sv_lan 都是引擎注册的，主菜单时已存在
+		EngineCommands.ClientCmd($"maxplayers {(int)Math.Round(_maxPlayers ?? 16)}");
+		EngineCommands.SetCvar("hostname", _hostname?.Trim() ?? "");
+		EngineCommands.SetCvar("sv_password", _password?.Trim() ?? "");
+		EngineCommands.SetCvarFloat("sv_use_steam_networking", _steamNetworking == true ? 1 : 0);
+		EngineCommands.SetCvarFloat("sv_lan", _steamNetworking == true ? 0 : 1);
+		EngineCommands.ClientCmd($"map {map}");
+
+		// mp_* 由游戏 DLL（mp.dll）注册，而 mp.dll 要到 map 起服务器时才加载——
+		// 在 map 之前下发会被引擎当 unknown command 丢弃（"第一局 800、第二局才生效"的根源）。
+		// 与原版一致（0x1F482-0x1F48F）：map 后紧跟两个 wait，把下面的命令推迟到
+		// 服务器已启动、mp.dll 注册完 cvar 之后执行，第一局即生效
+		EngineCommands.ClientCmd("wait\nwait\n");
+
+		EngineCommands.SetCvarFloat("mp_timelimit", ParseNum(_timelimit, 20));
+		EngineCommands.SetCvarFloat("mp_winlimit", ParseNum(_winlimit, 0));
+		EngineCommands.SetCvarFloat("mp_maxrounds", ParseNum(_maxrounds, 0));
+		EngineCommands.SetCvarFloat("mp_roundtime", (float)Math.Round(_roundtime ?? 5, 2));
+		EngineCommands.SetCvarFloat("mp_freezetime", (float)Math.Round(_freezetime ?? 6));
+		EngineCommands.SetCvarFloat("mp_buytime", ParseNum(_buytime, 1.5f));
+		EngineCommands.SetCvarFloat("mp_startmoney", (float)Math.Round(_startmoney ?? 800));
+		EngineCommands.SetCvarFloat("mp_footsteps", _footsteps == true ? 1 : 0);
+		EngineCommands.SetCvarFloat("mp_forcecamera", _cameraIndex);
+		EngineCommands.SetCvarFloat("mp_fadetoblack", _fadetoblack == true ? 1 : 0);
+		EngineCommands.SetCvarFloat("mp_friendlyfire", _friendlyFire == true ? 1 : 0);
+		EngineCommands.SetCvarFloat("mp_tkpunish", _tkpunish == true ? 1 : 0);
+		EngineCommands.SetCvarFloat("mp_autokick", _autokick == true ? 1 : 0);
+		EngineCommands.SetCvarFloat("mp_hostagepenalty", ParseNum(_hostagepenalty, 5));
+		EngineCommands.SetCvarFloat("mp_flashlight", _flashlight == true ? 1 : 0);
+
+		// 与原版一致（WriteGameplaySettings @0x1fef0）：开局时把控件值写回 settings.scr，
+		// 下次创建对话框（含重启游戏）从这里回读——这就是原版“记住上次设置”的全部来源
+		SettingsScr.SetValue("hostname", _hostname?.Trim() ?? "");
+		SettingsScr.SetValue("maxplayers", ((int)Math.Round(_maxPlayers ?? 16)).ToString());
+		SettingsScr.SetValue("sv_password", _password?.Trim() ?? "");
+		SettingsScr.SetValue("mp_timelimit", NumText(ParseNum(_timelimit, 20)));
+		SettingsScr.SetValue("mp_winlimit", NumText(ParseNum(_winlimit, 0)));
+		SettingsScr.SetValue("mp_maxrounds", NumText(ParseNum(_maxrounds, 0)));
+		SettingsScr.SetValue("mp_roundtime", NumText((float)Math.Round(_roundtime ?? 5, 2)));
+		SettingsScr.SetValue("mp_freezetime", NumText((float)Math.Round(_freezetime ?? 6)));
+		SettingsScr.SetValue("mp_buytime", NumText(ParseNum(_buytime, 1.5f)));
+		SettingsScr.SetValue("mp_startmoney", NumText((float)Math.Round(_startmoney ?? 800)));
+		SettingsScr.SetValue("mp_footsteps", _footsteps == true ? "1" : "0");
+		SettingsScr.SetValue("mp_forcecamera", _cameraIndex.ToString());
+		SettingsScr.SetValue("mp_fadetoblack", _fadetoblack == true ? "1" : "0");
+		SettingsScr.SetValue("mp_friendlyfire", _friendlyFire == true ? "1" : "0");
+		SettingsScr.SetValue("mp_tkpunish", _tkpunish == true ? "1" : "0");
+		SettingsScr.SetValue("mp_autokick", _autokick == true ? "1" : "0");
+		SettingsScr.SetValue("mp_hostagepenalty", NumText(ParseNum(_hostagepenalty, 5)));
+		SettingsScr.SetValue("mp_flashlight", _flashlight == true ? "1" : "0");
+
+		// 地图记忆：进程内 static 记选中项（可能是"随机地图"，等价原版常驻对话框）；
+		// CSBotConfig.vdf 跨重启存解析后的具体地图（原版 CZ 语义——Start 时随机已定型）
+		s_lastMap = _selectedMap;
+		BotConfigVdf.SetValue("map", map);
+	}
+}

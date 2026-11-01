@@ -1,0 +1,78 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+	<Import Project="../Game.targets" />
+	
+	<!-- TargetFramework / ImplicitUsings / Nullable / AllowUnsafeBlocks 见 Directory.Build.props -->
+
+	<PropertyGroup>
+		<RootNamespace>Plugin</RootNamespace>
+		<Configurations>Debug;Release;Preview</Configurations>
+		<!-- Preview = 独立桌面预览进程（Win32 平台，不挂引擎）；其余配置 = 注入到引擎的 AOT 插件 -->
+		<DefineConstants Condition="'$(Configuration)' != 'Preview'">METAHOOK_PLUGINS</DefineConstants>
+		<!-- 调试 razor 生成代码用 -->
+		<EmitCompilerGeneratedFiles>true</EmitCompilerGeneratedFiles>
+		<PublishAot>true</PublishAot>
+	</PropertyGroup>
+
+	<!-- GoldSrc.Avalonia 尚未发布到 NuGet，先引用本机仓库绝对路径；发布后删除该属性与
+	     下面的 ProjectReference，改用注释里的 PackageReference（版本随发布更新） -->
+	<PropertyGroup>
+		<GoldSrcAvaloniaDir>D:\workspace\GoldSrc.Avalonia</GoldSrcAvaloniaDir>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Avalonia" Version="12.1.4" />
+		<PackageReference Include="Avalonia.Desktop" Version="12.1.4" />
+		<PackageReference Include="Blazonia" Version="12.0.0-preview1.3" />
+		<PackageReference Include="Metahook.Net" Version="1.1.0" />
+		<PackageReference Include="OpenTK.Graphics" Version="4.9.4" />
+		<PackageReference Include="Avalonia.Themes.Fluent" Version="12.1.4" />
+		<PackageReference Include="Avalonia.Fonts.Inter" Version="12.1.4" />
+		<PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+		<ProjectReference Include="$(GoldSrcAvaloniaDir)\GoldSrc.Avalonia\GoldSrc.Avalonia.csproj" />
+		<!-- <PackageReference Include="GoldSrc.Avalonia" Version="0.1.0" /> -->
+	</ItemGroup>
+
+	<ItemGroup>
+		<AvaloniaResource Include="Assets\**" />
+		<Using Include="Plugin.Global">
+			<Static>True</Static>
+		</Using>
+	</ItemGroup>
+
+	<PropertyGroup Condition=" '$(Configuration)' == 'Preview' ">
+		<OutputType>Exe</OutputType>
+	</PropertyGroup>
+
+
+	<PropertyGroup Condition=" '$(Configuration)' != 'Preview' ">
+		<OutputType>Library</OutputType>
+		<RuntimeIdentifier>win-x86</RuntimeIdentifier>
+		<SelfContained>true</SelfContained>
+		<PublishAot>true</PublishAot>
+	</PropertyGroup>
+	
+	<ItemGroup Condition=" '$(Configuration)' != 'Preview' ">
+		<TrimmerRootDescriptor Include=".\TrimmerRoots.xml" />
+	</ItemGroup>
+	
+	<ItemGroup>
+	  <Folder Include="Properties\PublishProfiles\" />
+	</ItemGroup>
+	
+	<!-- Build 之后自动 Publish（AOT 产物才会落到插件目录）。
+	     内层 Publish 会再触发 Build，必须用独立全局属性把递归掐断，
+	     否则 MSBuild 报 MSB4006“目标依赖项关系图中存在循环依赖项”，
+	     构建直接失败、插件 DLL 得不到更新（表现为改了代码游戏里还是旧行为） -->
+	<Target Name="AfterBuildPublish" AfterTargets="Build" Condition=" '$(Configuration)' != 'Preview' AND '$(AfterBuildPublishRunning)' != 'true' ">
+		<MSBuild Projects="$(ProjectPath)" Targets="Publish" Properties="Configuration=$(Configuration);AfterBuildPublishRunning=true" />
+	</Target>
+
+	<!-- 发布产物落地：插件本体进 metahook/plugins，Skia 系原生库进游戏根目录（引擎加载路径） -->
+	<Target Name="CopyPublishedFilesToGame" AfterTargets="Publish" Condition=" '$(Configuration)' != 'Preview' ">
+		<Copy SourceFiles="$(PublishDir)/libHarfBuzzSharp.dll" DestinationFolder="$(CSDir)" />
+		<Copy SourceFiles="$(PublishDir)/libSkiaSharp.dll" DestinationFolder="$(CSDir)" />
+		<Copy SourceFiles="$(PublishDir)/$(AssemblyName).dll" DestinationFolder="$(PluginDir)" />
+	</Target>
+</Project>
+

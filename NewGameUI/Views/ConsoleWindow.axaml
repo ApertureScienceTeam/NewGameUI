@@ -1,0 +1,95 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="400" d:DesignHeight="560"
+        x:Class="Plugin.Views.ConsoleWindow"
+        Title="控制台" CanResize="True" ShowInTaskbar="False"
+        WindowDecorations="None"
+        RequestedThemeVariant="Dark">
+	<!-- Avalonia 版游戏控制台（替代 GameUI 的 CConsoleDialog）。
+	     显隐完全由引擎 IGameConsole::Activate/Hide 驱动；布局/颜色对齐原版：
+	     Printf #D8DED3、DPrintf #C4B550，输入行高 24、提交按钮宽 64。
+	     无系统边框（vgui2 弹层也没有）：标题栏自绘/可拖动、右下角可缩放 -->
+	<Window.Resources>
+		<SolidColorBrush x:Key="ConsolePrintBrush" Color="#D8DED3" />
+		<SolidColorBrush x:Key="ConsoleDevBrush" Color="#C4B550" />
+		<SolidColorBrush x:Key="ConsoleSurfaceBrush" Color="#161E27" />
+		<SolidColorBrush x:Key="ConsolePanelBrush" Color="#0D1319" />
+		<SolidColorBrush x:Key="ConsoleBorderBrush" Color="#2C3843" />
+		<SolidColorBrush x:Key="ConsoleTitleBrush" Color="#1C2631" />
+		<SolidColorBrush x:Key="ConsoleTitleTextBrush" Color="#C9D6E2" />
+		<SolidColorBrush x:Key="ConsoleHintBrush" Color="#7F92A5" />
+	</Window.Resources>
+
+	<Window.Styles>
+		<FluentTheme />
+	</Window.Styles>
+
+	<Border Background="{StaticResource ConsoleSurfaceBrush}"
+	        BorderBrush="{StaticResource ConsoleBorderBrush}" BorderThickness="1">
+		<Grid RowDefinitions="26,*,Auto,8">
+
+			<!-- 标题栏：拖动窗口 -->
+			<Border Grid.Row="0" Background="{StaticResource ConsoleTitleBrush}" PointerPressed="OnTitleBarPressed">
+				<Grid ColumnDefinitions="*,Auto">
+					<TextBlock x:Name="TitleText" Text="控制台" FontSize="12" Margin="10,0,0,0"
+					           Foreground="{StaticResource ConsoleTitleTextBrush}"
+					           VerticalAlignment="Center" />
+					<Button x:Name="CloseButton" Grid.Column="1" Content="✕" Width="34" Height="24"
+					        Padding="0" Margin="0,0,2,0" FontSize="12"
+					        Background="Transparent" Foreground="#A9B7C6"
+					        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+					        Click="OnCloseClick" />
+				</Grid>
+			</Border>
+
+			<!-- 历史输出 + 补全浮层（与输入框同一行高度之上，原版 CompletionList 也在输入框上方） -->
+			<Panel Grid.Row="1" Margin="8,6,8,0">
+				<Border Background="{StaticResource ConsolePanelBrush}"
+				        BorderBrush="{StaticResource ConsoleBorderBrush}" BorderThickness="1">
+					<ScrollViewer x:Name="HistoryScroll"
+					              HorizontalScrollBarVisibility="Auto"
+					              VerticalScrollBarVisibility="Auto"
+					              Padding="6,4">
+						<TextBlock x:Name="HistoryText" TextWrapping="NoWrap"
+						           FontFamily="Consolas, Courier New" FontSize="12"
+						           Foreground="{StaticResource ConsolePrintBrush}" />
+					</ScrollViewer>
+				</Border>
+
+				<Border x:Name="CompletionPanel" IsVisible="False"
+				        VerticalAlignment="Bottom" HorizontalAlignment="Stretch"
+				        MaxHeight="182" Background="#1D2833"
+				        BorderBrush="#3A4A5A" BorderThickness="1" Padding="2">
+					<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+						<StackPanel x:Name="CompletionList" />
+					</ScrollViewer>
+				</Border>
+			</Panel>
+
+			<!-- 输入行：原版 entryHeight=24、submitWide=64、submitInset=7 -->
+			<Grid Grid.Row="2" Margin="8,6,8,8" ColumnDefinitions="*,Auto">
+				<TextBox x:Name="Entry" Height="26" PlaceholderText="输入命令…"
+				         FontFamily="Consolas, Courier New" FontSize="12"
+				         Background="{StaticResource ConsolePanelBrush}"
+				         Foreground="{StaticResource ConsolePrintBrush}"
+				         BorderBrush="{StaticResource ConsoleBorderBrush}"
+				         CaretBrush="{StaticResource ConsolePrintBrush}"
+				         Padding="6,0" VerticalContentAlignment="Center" />
+				<Button x:Name="SubmitButton" Grid.Column="1" Content="提交"
+				        Width="64" Height="26" Margin="7,0,0,0" Padding="0" FontSize="12"
+				        Background="#26323F" Foreground="#DCE6EF"
+				        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+				        Click="OnSubmitClick" />
+			</Grid>
+
+			<!-- 右下角缩放热区（HostedWindow 通过 BeginResizeDrag 改面板几何） -->
+			<Border Grid.Row="3" Background="Transparent" Cursor="BottomRightCorner"
+			        HorizontalAlignment="Right" Width="18" PointerPressed="OnResizeGripPressed">
+				<Path Data="M 0,6 L 6,6 L 6,0 Z" Fill="#4A5B6B" HorizontalAlignment="Right"
+				      VerticalAlignment="Bottom" Stretch="None" Margin="0,0,3,2" />
+			</Border>
+		</Grid>
+	</Border>
+</Window>

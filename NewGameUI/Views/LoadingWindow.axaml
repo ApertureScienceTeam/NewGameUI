@@ -1,0 +1,91 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="720"
+        x:Class="Plugin.Views.LoadingWindow"
+        Title="载入中" CanResize="False" ShowInTaskbar="False" WindowDecorations="None"
+        RequestedThemeVariant="Dark">
+	<!-- 关卡加载/资源下载覆盖窗：替代原版 GameUI 的 CLoadingDialog。
+	     进度数据来自 IGameUI 的 StartProgressBar/ContinueProgressBar/
+	     StopProgressBar/SetProgressBarStatusText（EngineBaseUI 钩子，槽 14-17），
+	     下载资源阶段来自槽 18/19（下载进度 + 当前文件），与原版进度条同源；
+	     这里用 Avalonia 自绘（无 vgui2 控件）。
+	     窗口铺满游戏屏幕并跟随分辨率（构造时取 vgui2 屏幕尺寸，左上角 0,0） -->
+	<Window.Resources>
+		<LinearGradientBrush x:Key="BarFillBrush" StartPoint="0%,0%" EndPoint="100%,0%">
+			<GradientStop Color="#3E8FD0" Offset="0" />
+			<GradientStop Color="#6FBAF5" Offset="0.65" />
+			<GradientStop Color="#A9DBFF" Offset="1" />
+		</LinearGradientBrush>
+		<LinearGradientBrush x:Key="BarFillErrorBrush" StartPoint="0%,0%" EndPoint="100%,0%">
+			<GradientStop Color="#A8443E" Offset="0" />
+			<GradientStop Color="#E8746E" Offset="1" />
+		</LinearGradientBrush>
+		<SolidColorBrush x:Key="TextPrimaryBrush" Color="#E9EFF5" />
+		<SolidColorBrush x:Key="TextSecondaryBrush" Color="#A9B7C6" />
+		<SolidColorBrush x:Key="TextMutedBrush" Color="#6F7E8D" />
+		<SolidColorBrush x:Key="AccentBrush" Color="#6FBAF5" />
+	</Window.Resources>
+
+	<Border>
+		<Border.Background>
+			<RadialGradientBrush Center="50%,42%" GradientOrigin="50%,42%" RadiusX="0.75" RadiusY="0.75">
+				<GradientStop Color="#12202E" Offset="0" />
+				<GradientStop Color="#0B0F14" Offset="1" />
+			</RadialGradientBrush>
+		</Border.Background>
+
+		<Grid RowDefinitions="*,Auto" Margin="48">
+			<!-- 居中：资源名 + 自绘进度条 + 状态/百分比 -->
+			<StackPanel Grid.Row="0" Width="560" Spacing="14"
+			            HorizontalAlignment="Center" VerticalAlignment="Center">
+
+				<StackPanel Spacing="4">
+					<StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Center">
+						<Border Width="18" Height="2" CornerRadius="1" Background="{StaticResource AccentBrush}"
+						        VerticalAlignment="Center" />
+						<TextBlock x:Name="LoadingLabel" Text="正在载入" FontSize="12"
+						           Foreground="{StaticResource TextMutedBrush}" VerticalAlignment="Center" />
+					</StackPanel>
+					<TextBlock x:Name="TitleText" Text="de_dust2" FontSize="30" FontWeight="SemiBold"
+					           Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center"
+					           TextTrimming="CharacterEllipsis" />
+				</StackPanel>
+
+				<!-- 进度条：轨道 + 渐变填充（宽度由代码按比例设置，纯 Avalonia 绘制） -->
+				<Panel Height="16" Margin="0,6,0,0">
+					<Border x:Name="TrackBar" CornerRadius="8" Background="#101821"
+					        BorderBrush="#243040" BorderThickness="1" BoxShadow="0 2 10 0 #40000000" />
+					<Border x:Name="FillBar" CornerRadius="7" Height="12" Width="0" Margin="2,0,0,0"
+					        HorizontalAlignment="Left" VerticalAlignment="Center"
+					        Background="{StaticResource BarFillBrush}" />
+				</Panel>
+
+				<Grid ColumnDefinitions="*,Auto">
+					<TextBlock x:Name="StatusText" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}"
+					           TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+					<TextBlock x:Name="PercentText" Grid.Column="1" Text="0%" FontSize="12" FontWeight="SemiBold"
+					           Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center" />
+				</Grid>
+
+				<!-- 下载区块（对应原版 LoadingDialogDualProgress 的 SecondaryProgressLabel +
+				     Progress2）：进入资源下载（槽 18 首次回调）才出现，平时隐藏 -->
+				<StackPanel x:Name="SecondaryBlock" Spacing="6" IsVisible="False">
+					<TextBlock x:Name="SubStatusText" FontSize="11" Foreground="{StaticResource TextMutedBrush}"
+					           TextTrimming="CharacterEllipsis" />
+					<Panel Height="12" Margin="0,0,0,0">
+						<Border x:Name="SecondaryTrackBar" CornerRadius="6" Background="#101821"
+						        BorderBrush="#243040" BorderThickness="1" />
+						<Border x:Name="SecondaryFillBar" CornerRadius="5" Height="8" Width="0" Margin="2,0,0,0"
+						        HorizontalAlignment="Left" VerticalAlignment="Center"
+						        Background="{StaticResource BarFillBrush}" />
+					</Panel>
+				</StackPanel>
+			</StackPanel>
+
+			<TextBlock Grid.Row="1" Text="载入完成后自动进入游戏" FontSize="11"
+			           Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center" />
+		</Grid>
+	</Border>
+</Window>

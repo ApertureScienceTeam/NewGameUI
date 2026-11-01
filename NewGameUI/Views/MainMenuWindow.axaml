@@ -1,0 +1,216 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:b="https://blazonia.github.io"
+        mc:Ignorable="d" d:DesignWidth="1280" d:DesignHeight="720"
+        x:Class="Plugin.Views.MainMenuWindow"
+        Title="主菜单" CanResize="False" WindowDecorations="None"
+        Background="Transparent"
+        RequestedThemeVariant="Dark">
+	<!-- 全屏单窗口，两种页面由 GameMode.EnteredGame 决定（见代码隐藏）：
+	     未进入对局 -> 主页面（午夜蓝设计系统，左侧导航 + 右侧内容区）；
+	     已进入对局、被引擎 ESC 打开 -> 暂停页（半透明遮罩透出引擎画面 + 居中按钮列）。
+	     窗口背景透明，主页面自带渐变底色，暂停页才能直接透出游戏画面 -->
+	<Window.Resources>
+		<SolidColorBrush x:Key="AccentBrush" Color="#4FA3E3" />
+		<SolidColorBrush x:Key="AccentBrightBrush" Color="#6FBAF5" />
+		<SolidColorBrush x:Key="TextPrimaryBrush" Color="#E9EFF5" />
+		<SolidColorBrush x:Key="NavIdleBrush" Color="#B7C2CE" />
+		<SolidColorBrush x:Key="NavHoverBrush" Color="#131B26" />
+		<SolidColorBrush x:Key="NavSelectedBrush" Color="#1B2838" />
+		<SolidColorBrush x:Key="DangerBrush" Color="#E8746E" />
+		<SolidColorBrush x:Key="DangerBrightBrush" Color="#F2938E" />
+		<SolidColorBrush x:Key="DividerBrush" Color="#1E2836" />
+
+		<!-- 导航按钮：自绘模板保证内容垂直居中；selected / quit 状态类由代码切换 -->
+		<ControlTheme x:Key="NavButton" TargetType="Button">
+			<Setter Property="Height" Value="42" />
+			<Setter Property="Padding" Value="14,0,0,0" />
+			<Setter Property="Background" Value="Transparent" />
+			<Setter Property="Foreground" Value="{StaticResource NavIdleBrush}" />
+			<Setter Property="FontSize" Value="14" />
+			<Setter Property="HorizontalContentAlignment" Value="Left" />
+			<Setter Property="VerticalContentAlignment" Value="Center" />
+			<Setter Property="Template">
+				<ControlTemplate>
+					<Panel>
+						<Border Background="{TemplateBinding Background}" CornerRadius="7" />
+						<Border x:Name="PART_Accent" Width="3" Height="18" CornerRadius="1.5"
+						        HorizontalAlignment="Left" VerticalAlignment="Center"
+						        Background="{StaticResource AccentBrightBrush}" IsVisible="False" />
+						<ContentPresenter Content="{TemplateBinding Content}"
+						                  ContentTemplate="{TemplateBinding ContentTemplate}"
+						                  Margin="{TemplateBinding Padding}"
+						                  HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+						                  VerticalAlignment="{TemplateBinding VerticalContentAlignment}" />
+					</Panel>
+				</ControlTemplate>
+			</Setter>
+			<Style Selector="^:pointerover">
+				<Setter Property="Background" Value="{StaticResource NavHoverBrush}" />
+				<Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+			</Style>
+			<Style Selector="^:pressed">
+				<Setter Property="Background" Value="#10171F" />
+			</Style>
+			<Style Selector="^.selected">
+				<Setter Property="Background" Value="{StaticResource NavSelectedBrush}" />
+				<Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+			</Style>
+			<Style Selector="^.selected /template/ Border#PART_Accent">
+				<Setter Property="IsVisible" Value="True" />
+			</Style>
+			<Style Selector="^.quit">
+				<!-- 退出按钮：红底白字（悬停亮红、按下暗红），比后面的通用态样式晚声明，
+				     同名属性以这里的为准 -->
+				<Setter Property="Background" Value="{StaticResource DangerBrush}" />
+				<Setter Property="Foreground" Value="Black" />
+			</Style>
+			<Style Selector="^.quit:pointerover">
+				<Setter Property="Background" Value="{StaticResource DangerBrightBrush}" />
+				<Setter Property="Foreground" Value="White" />
+			</Style>
+			<Style Selector="^.quit:pressed">
+				<Setter Property="Background" Value="#C95750" />
+				<Setter Property="Foreground" Value="White" />
+			</Style>
+		</ControlTheme>
+	</Window.Resources>
+
+	<Window.Styles>
+		<FluentTheme />
+
+		<!-- 服务器浏览器列表（razor 里 Classes="serverlist"）：扁平行、固定行高，
+		     配合 ListBox 默认的 VirtualizingStackPanel 做虚拟化 -->
+		<Style Selector="ListBox.serverlist">
+			<Setter Property="Background" Value="Transparent" />
+			<Setter Property="BorderThickness" Value="0" />
+			<Setter Property="Padding" Value="0" />
+			<Setter Property="SelectionMode" Value="Single" />
+		</Style>
+		<Style Selector="ListBox.serverlist ListBoxItem">
+			<Setter Property="Height" Value="24" />
+			<Setter Property="MinHeight" Value="0" />
+			<Setter Property="Padding" Value="0" />
+			<Setter Property="CornerRadius" Value="0" />
+			<Setter Property="Background" Value="Transparent" />
+			<Setter Property="VerticalContentAlignment" Value="Center" />
+		</Style>
+		<Style Selector="ListBox.serverlist ListBoxItem:pointerover">
+			<Setter Property="Background" Value="#131B26" />
+		</Style>
+		<Style Selector="ListBox.serverlist ListBoxItem:selected">
+			<Setter Property="Background" Value="#1B2838" />
+			<Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+		</Style>
+
+		<!-- 暂停页按钮：居中的长方块按钮列 -->
+		<Style Selector="Button.menu">
+			<Setter Property="Width" Value="300" />
+			<Setter Property="Height" Value="46" />
+			<Setter Property="CornerRadius" Value="4" />
+			<Setter Property="Background" Value="#D90E151D" />
+			<Setter Property="BorderBrush" Value="#38FFFFFF" />
+			<Setter Property="BorderThickness" Value="1" />
+			<Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+			<Setter Property="FontSize" Value="15" />
+			<Setter Property="HorizontalAlignment" Value="Center" />
+			<Setter Property="HorizontalContentAlignment" Value="Center" />
+			<Setter Property="VerticalContentAlignment" Value="Center" />
+		</Style>
+		<Style Selector="Button.menu:pointerover">
+			<Setter Property="Background" Value="#F01B2836" />
+			<Setter Property="BorderBrush" Value="#66FFFFFF" />
+		</Style>
+		<Style Selector="Button.menu:pressed">
+			<Setter Property="Background" Value="#F00A0F15" />
+		</Style>
+		<Style Selector="Button.menu.danger">
+			<Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+		</Style>
+		<Style Selector="Button.menu.danger:pointerover">
+			<Setter Property="Foreground" Value="{StaticResource DangerBrightBrush}" />
+		</Style>
+	</Window.Styles>
+
+	<Panel>
+		<!-- 主页面：启动/断开连接后的主菜单 -->
+		<Grid x:Name="MainShell" ColumnDefinitions="230,*">
+			<Grid.Background>
+				<LinearGradientBrush StartPoint="0%,0%" EndPoint="100%,100%">
+					<GradientStop Color="#141B25" Offset="0" />
+					<GradientStop Color="#0C1117" Offset="1" />
+				</LinearGradientBrush>
+			</Grid.Background>
+			<Border Grid.Column="0" Background="#0A0E14" Padding="24,36,24,24"
+			        BorderBrush="{StaticResource DividerBrush}" BorderThickness="0,0,1,0">
+				<!-- 上：品牌 + 导航；下（* 行撑开）：退出游戏固定在左下角 -->
+				<Grid RowDefinitions="*,Auto">
+					<StackPanel Grid.Row="0" Spacing="6">
+						<!-- CS 主菜单 logo：取自游戏文件 cstrike\resource\logo_game.tga
+						     （原版加载页同款白字版，512x32 中内容实际 205x24，裁掉透明边距打包）；
+						     高度 15 对应原文字 16px 的视觉尺寸 -->
+						<Image Source="avares://NewGameUI/Assets/cs_logo.png" Height="15"
+						       HorizontalAlignment="Left" Margin="0,3,0,0" />
+						<Button x:Name="NavNewGame" Theme="{StaticResource NavButton}" Content="新建游戏" Click="OnNavNewGame" />
+						<!-- 原版 GameMenu.res 的顺序：New Game → Find Servers → Options（收藏夹已移除） -->
+						<Button x:Name="NavFindServers" Theme="{StaticResource NavButton}" Content="查找服务器"
+						        Click="OnNavFindServers" />
+						<Button x:Name="NavOptions" Theme="{StaticResource NavButton}" Content="游戏选项" Click="OnNavOptions" />
+					</StackPanel>
+					<Button Grid.Row="1" x:Name="NavQuit" Theme="{StaticResource NavButton}" Classes="quit" Content="退出游戏"
+					        Margin="0,20,0,0" Click="OnQuit" />
+				</Grid>
+			</Border>
+
+			<ContentControl Grid.Column="1" x:Name="ContentHost" />
+		</Grid>
+
+		<!-- 暂停页：游戏内按 ESC（引擎 ActivateGameUI）时显示。半透明遮罩透出
+		     引擎画面（HUD 已由引擎 HideGameUI 收掉，与原版一致） -->
+		<Panel x:Name="PausePage" Background="#66000000" IsVisible="False">
+			<StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10">
+				<Button Classes="menu" Content="返回游戏" Click="OnResumeClick" />
+				<Button Classes="menu" Content="断开链接" Click="OnDisconnectClick" />
+				<Button Classes="menu" Content="游戏设置" Click="OnPauseSettingsClick" />
+				<Button Classes="menu danger" Content="退出游戏" Click="OnQuit" />
+			</StackPanel>
+		</Panel>
+
+		<!-- 暂停页的游戏设置：复用主菜单的选项表单（每次打开新建实例重新读 cvar）。
+		     遮罩只负责拦截点击，不叠暗色——下方暂停页已有半透明底，再叠会过黑 -->
+		<Border x:Name="SettingsBackdrop" Background="Transparent" IsVisible="False"
+		        Tapped="OnSettingsBackdropTapped">
+			<Grid x:Name="SettingsHost" HorizontalAlignment="Center" VerticalAlignment="Center">
+				<ContentControl x:Name="SettingsContent" />
+				<Button x:Name="SettingsCloseButton"
+				        Content="✕" Width="34" Height="28" Padding="0" Margin="0,28,30,0"
+				        FontSize="12" Background="Transparent" Foreground="#A9B7C6"
+				        HorizontalAlignment="Right" VerticalAlignment="Top"
+				        HorizontalContentAlignment="Center" VerticalContentAlignment="Center"
+				        Click="OnSettingsCloseClick" />
+			</Grid>
+		</Border>
+
+		<!-- 退出确认模态：遮罩吞掉背后所有点击，Esc / 点遮罩 / 取消 关闭，退出 下发 quit。
+		     遮罩透明，暗色只由下方暂停页提供 -->
+		<Border x:Name="QuitDialogBackdrop" Background="Transparent" IsVisible="False" Tapped="OnQuitBackdropTapped">
+			<Border Background="#161D26" BorderBrush="#2A3644" BorderThickness="1"
+			        CornerRadius="12" Width="360" Padding="24"
+			        HorizontalAlignment="Center" VerticalAlignment="Center">
+				<StackPanel Spacing="8">
+					<TextBlock Text="退出游戏" FontSize="16" FontWeight="SemiBold"
+					           Foreground="{StaticResource TextPrimaryBrush}" />
+					<TextBlock Text="确定要退出游戏吗？" FontSize="13" Foreground="#C6D2DD" Margin="0,0,0,10" />
+					<StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+						<Button x:Name="QuitCancel" Content="取消" Width="88" Height="34" CornerRadius="6"
+						        Background="#263140" Foreground="#DCE6EF" Click="OnQuitCancel" />
+						<Button x:Name="QuitConfirm" Content="退出" Width="88" Height="34" CornerRadius="6"
+						        Background="{StaticResource DangerBrush}" Foreground="#0B1016" Click="OnQuitConfirmed" />
+					</StackPanel>
+				</StackPanel>
+			</Border>
+		</Border>
+	</Panel>
+</Window>

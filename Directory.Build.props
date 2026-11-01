@@ -1,0 +1,12 @@
+<Project>
+
+	<!-- 三个正式项目共用的基础属性；各项目自己的差异（OutputType / Configurations 等）仍在各自 csproj 里 -->
+
+	<PropertyGroup>
+		<TargetFramework>net10.0</TargetFramework>
+		<ImplicitUsings>enable</ImplicitUsings>
+		<Nullable>enable</Nullable>
+		<AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+	</PropertyGroup>
+
+</Project>

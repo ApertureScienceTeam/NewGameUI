@@ -1,0 +1,13 @@
+<Project>
+	<!--
+	游戏安装目录相关的路径集中在这里，发布 target 不再硬编码子目录。
+	CS = Counter-Strike（即 Half-Life 根目录）。
+	-->
+	<PropertyGroup>
+		<CSDir>D:\SteamLibrary\steamapps\common\Half-Life</CSDir>
+		<!-- 模组目录（cstrike） -->
+		<GameModDir>$(CSDir)\cstrike</GameModDir>
+		<!-- AOT 插件与依赖原生库的落点 -->
+		<PluginDir>$(GameModDir)\metahook\plugins</PluginDir>
+	</PropertyGroup>
+</Project>

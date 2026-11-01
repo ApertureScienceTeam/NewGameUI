@@ -1,0 +1,17 @@
+<Project>
+
+	<!--
+	Avalonia 12.1.4 的 ref\net10.0 程序集元数据有问题（Raw*EventArgs 等构造函数的可访问性丢失），
+	编译时必须改用 lib\net10.0。三个项目都需要这条规则，所以放在这里统一，
+	不再在每个 csproj 里各写一份（原 AvaloniaOpenHarmonyReferenceAvaloniaRuntimeAssemblies）。
+	-->
+	<Target Name="UseAvaloniaRuntimeAssembliesForCompile"
+	        AfterTargets="ResolvePackageAssets"
+	        BeforeTargets="ResolveLockFileReferences;ResolveAssemblyReferences">
+		<ItemGroup>
+			<ResolvedCompileFileDefinitions Include="@(ResolvedCompileFileDefinitions->'%(Identity)'->Replace('/ref/', '/lib/')->Replace('\ref\', '\lib\'))" HintPath="$([System.String]::new('%(HintPath)').Replace('/ref/', '/lib/').Replace('\ref\', '\lib\'))" PathInPackage="lib/$([System.String]::new('%(PathInPackage)').Substring(4))" Condition="$([System.String]::new('%(PathInPackage)').StartsWith('ref/'))" />
+			<ResolvedCompileFileDefinitions Remove="@(ResolvedCompileFileDefinitions)" Condition="$([System.String]::new('%(PathInPackage)').StartsWith('ref/'))" />
+		</ItemGroup>
+	</Target>
+
+</Project>

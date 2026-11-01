@@ -1,0 +1,1161 @@
+@* 游戏选项表单：逐页复刻原版 GameUI 选项对话框（GameUI.dll COptionsDialog + resource\OptionsSub*.res）。
+   标签页顺序与原版 AddPage 一致（CS 1.6，liblist type=multiplayer_only）：
+   多人游戏 / 音频 / 视频 / 瞄准(Aim) / 键盘 / 语音 / 内容(Content)。
+   - 多人游戏（cstrike OptionsSubMultiplayer.res）：名字(name)、喷漆(cl_logofile/cl_logocolor)、
+     准星(cl_crosshair_color 5 色/cl_crosshair_size/cl_crosshair_translucent)、
+     高级…（cstrike/user.scr INFO_OPTIONS 全部 13 项）
+   - 音频（OptionsSubAudio.res）：volume / MP3Volume / suitvolume / hisound 音质
+   - 视频（OptionsSubVideo.res）：视频模式 / 窗口 / 宽屏(gl_widescreen_yfov) / 垂直同步 /
+     纹理过滤(r_prefertexturefiltering) / 着色器(gl_use_shaders) / 亮度 / 伽马
+   - 瞄准（OptionsSubMouse.res，原英文 Tab 名 Aim）：m_pitch / m_filter / sv_aim / m_rawinput /
+     gl_lowlatency / sensitivity（原版复选框均带说明文字，此页一致）
+   - 键盘（OptionsSubKeyboard.res + gfx/shell/kb_act.lst & kb_def.lst）：动作分组与顺序、默认键位
+     按原版列表；双键槽对应原版 KEY/BUTTON 与 ALTERNATE 两列
+   - 语音（OptionsSubVoice.res）：voice_modenable / voice_scale；发送音量与麦克风增益是
+     引擎侧实现（无 cvar），仅提示
+   - 内容（OptionsSubAdvanced.res，原 Tab 名 Content）：细节纹理(r_detailtextures) /
+     原始模型(cl_himodels 反向) / 自定义附加内容(_setaddons_folder)
+   全部 cvar/命令驱动；进入页面时读 cvar 与 config.cfg 保存值，底部"应用"统一下发 *@
+<Border Background="@("#161D26")" CornerRadius="12"
+        BorderBrush="@("#2A3644")" BorderThickness="1"
+        Padding="@("20,12")" Margin="20">
+	<Grid RowDefinitions="@("*,Auto")">
+		<TabControl Grid.Row="0" T="TabItem" Margin="@("0,4,0,0")"
+		            SelectedIndex="@_tabIndex" OnSelectionChanged="OnTabChanged">
+			<TabItem Header="@("多人游戏")">
+				<ScrollViewer>
+					<StackPanel Spacing="12" Margin="@("16,16")">
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<TextBlock Text="玩家名字" Width="120" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<TextBox @bind-Text="_name" Width="300" MaxLength="63" />
+							</StackPanel>
+
+							@* 原版 cstrike 页隐藏了玩家模型/主副色（visible=0），CS 只显示喷漆与准星 *@
+							<TextBlock Text="喷漆" FontWeight="FontWeight.SemiBold" Foreground="@("#E9EFF5")"
+							           Margin="@("0,8,0,0")" />
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<TextBlock Text="喷漆图案" Width="120" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<ComboBox T="string" ItemsSource="@_logos" OnSelectionChanged="OnLogoSelected"
+								          SelectedIndex="@_logoIndex" Width="260" MaxDropDownHeight="240"
+								          VerticalAlignment="VerticalAlignment.Center" />
+								@* 喷漆图案预览：读 logos/<名字>.bmp（调色板索引 255 透明） *@
+								<Border Width="68" Height="68" Background="@("#0F151B")" CornerRadius="4" Padding="2">
+									<Image Source="@_logoPreview" />
+								</Border>
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<TextBlock Text="喷漆颜色" Width="120" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<ComboBox T="string" ItemsSource="@s_logoColorLabels" OnSelectionChanged="OnLogoColorSelected"
+								          SelectedIndex="@_logoColorIndex" Width="180" />
+							</StackPanel>
+							<TextBlock Text="喷漆修改在加入服务器后生效" FontSize="11" Foreground="@("#8C9CAC")" />
+
+							<TextBlock Text="准星外观" FontWeight="FontWeight.SemiBold" Foreground="@("#E9EFF5")"
+							           Margin="@("0,8,0,0")" />
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<TextBlock Text="颜色" Width="120" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<ComboBox T="string" ItemsSource="@s_crosshairColorLabels" OnSelectionChanged="OnCrosshairColorSelected"
+								          SelectedIndex="@_crosshairColorIndex" Width="180" />
+								<TextBlock Text="大小" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<ComboBox T="string" ItemsSource="@s_crosshairSizeLabels" OnSelectionChanged="OnCrosshairSizeSelected"
+								          SelectedIndex="@_crosshairSizeIndex" Width="120" />
+								@* 准星预览：几何按 client.dll 的 HUD_DrawCrosshair 还原（4 根短条 + 中心间隙） *@
+								<Grid Width="120" Height="120" Background="@("#0F151B")" Margin="@("16,0,0,0")"
+								      ClipToBounds="true">
+									@foreach (var bar in CrosshairBars)
+									{
+										<Border Background="@CrosshairColorText" Width="@bar.W" Height="@bar.H"
+										        Margin="@bar.Offset"
+										        HorizontalAlignment="HorizontalAlignment.Left"
+										        VerticalAlignment="VerticalAlignment.Top" />
+									}
+								</Grid>
+							</StackPanel>
+							<CheckBox @bind-IsChecked="_crosshairTranslucent">半透明准星</CheckBox>
+
+							@* 高级…：原版按钮打开 MultiplayerAdvancedDialog，条目来自 cstrike/user.scr INFO_OPTIONS *@
+							<Expander Header="@("高级选项…")" Margin="@("0,8,0,0")">
+								<StackPanel Spacing="10" Margin="@("8,12")">
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="尸体消失时间" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<TextBox @bind-Text="_corpsestay" Width="100" />
+										<TextBlock Text="秒（0 = 不消失）" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+									</StackPanel>
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="贴花上限" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<TextBox @bind-Text="_mpDecals" Width="100" />
+									</StackPanel>
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="最大弹壳数" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<TextBox @bind-Text="_maxShells" Width="100" />
+									</StackPanel>
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="最大烟雾粒子" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<TextBox @bind-Text="_maxSmokePuffs" Width="100" />
+									</StackPanel>
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="烟雾/毒气弹效果" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<ComboBox T="string" ItemsSource="@s_fastSpritesLabels" OnSelectionChanged="@((Avalonia.Controls.SelectionChangedEventArgs e) => OnAdvListSelected("fastsprites", e))"
+										          SelectedIndex="@_advListIndex["fastsprites"]" Width="180" />
+									</StackPanel>
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="武器持向" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<ComboBox T="string" ItemsSource="@s_handLabels" OnSelectionChanged="@((Avalonia.Controls.SelectionChangedEventArgs e) => OnAdvListSelected("cl_righthand", e))"
+										          SelectedIndex="@_advListIndex["cl_righthand"]" Width="180" />
+									</StackPanel>
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="购买菜单样式" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<ComboBox T="string" ItemsSource="@s_buyMenuLabels" OnSelectionChanged="@((Avalonia.Controls.SelectionChangedEventArgs e) => OnAdvListSelected("_vgui_menus", e))"
+										          SelectedIndex="@_advListIndex["_vgui_menus"]" Width="180" />
+									</StackPanel>
+									<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+										<TextBlock Text="雷达样式" Width="120" VerticalAlignment="VerticalAlignment.Center"
+										           Foreground="@("#C6D2DD")" />
+										<ComboBox T="string" ItemsSource="@s_radarLabels" OnSelectionChanged="@((Avalonia.Controls.SelectionChangedEventArgs e) => OnAdvListSelected("cl_radartype", e))"
+										          SelectedIndex="@_advListIndex["cl_radartype"]" Width="180" />
+									</StackPanel>
+									<CheckBox @bind-IsChecked="_autoWeaponSwitch">自动换更强大的武器</CheckBox>
+									<CheckBox @bind-IsChecked="_centerId">居中显示玩家名字</CheckBox>
+									<CheckBox @bind-IsChecked="_autoHelp">自动帮助</CheckBox>
+									<CheckBox @bind-IsChecked="_autoScreenshots">自动截图</CheckBox>
+									<CheckBox @bind-IsChecked="_observerCrosshair">允许观察者准星</CheckBox>
+								</StackPanel>
+							</Expander>
+						</StackPanel>
+					</ScrollViewer>
+				</TabItem>
+
+			<TabItem Header="@("音频")">
+				<ScrollViewer>
+					<StackPanel Spacing="12" Margin="@("16,16")">
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="音效音量" Width="130" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="0" Maximum="1" Width="260" @bind-Value="_volume" />
+							<TextBlock Text="@VolumeText" Width="40" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<TextBlock Text="MP3 音量" Width="130" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<Slider Minimum="0" Maximum="1" Width="260" @bind-Value="_mp3Volume" />
+								<TextBlock Text="@Mp3VolumeText" Width="40" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<TextBlock Text="HEV 服音量" Width="130" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<Slider Minimum="0" Maximum="1" Width="260" @bind-Value="_suitVolume" />
+								<TextBlock Text="@SuitVolumeText" Width="40" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+							</StackPanel>
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="音质" Width="130" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<ComboBox T="string" ItemsSource="@s_soundQualities" OnSelectionChanged="OnSoundQualitySelected"
+							          SelectedIndex="@_soundQualityIndex" Width="180" />
+						</StackPanel>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+			<TabItem Header="@("视频")">
+				<ScrollViewer>
+					<StackPanel Spacing="12" Margin="@("16,16")">
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="渲染器" Width="110" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBlock Text="OpenGL（本插件要求）" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#8C9CAC")" />
+						</StackPanel>
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="分辨率" Width="110" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							@* 用 SelectedItem 而不是 SelectedIndex：切换宽屏时新旧列表的选中下标可能相同，
+							   Blazonia 对 SelectedIndex 是按缓存值跳过的，序号没变就不写控件，下拉会显示空白 *@
+							<ComboBox T="string" ItemsSource="@_videoModeLabels" OnSelectionChanged="OnVideoModeSelected"
+							          SelectedItem="@SelectedVideoModeLabel" Width="220" MaxDropDownHeight="300"
+							          IsEnabled="@(_videoModeLabels.Length > 0)" />
+						</StackPanel>
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="窗口模式" Width="110" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<CheckBox @bind-IsChecked="_windowed">窗口化</CheckBox>
+						</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<TextBlock Text="宽屏视场" Width="110" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<CheckBox IsChecked="@_widescreenFov" IsCheckedChanged="OnWidescreenFovChanged">允许宽屏视场（FOV）</CheckBox>
+							</StackPanel>
+							<CheckBox @bind-IsChecked="_vsync">等待垂直同步</CheckBox>
+							<CheckBox @bind-IsChecked="_textureFiltering">启用纹理过滤</CheckBox>
+							<CheckBox @bind-IsChecked="_shaders">使用着色器</CheckBox>
+							<TextBlock Text="分辨率列表按宽屏视场过滤：勾选显示 16:9，取消显示 4:3，切换时自动改选高度最接近的分辨率。应用视频模式时，画面可能短暂黑屏或重建。"
+							           FontSize="11" Foreground="@("#8C9CAC")" TextWrapping="TextWrapping.Wrap" />
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12" Margin="@("0,8,0,0")">
+								<TextBlock Text="亮度" Width="110" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<Slider Minimum="0" Maximum="2" Width="260" @bind-Value="_brightness" />
+								<TextBlock Text="@BrightnessText" Width="40" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<TextBlock Text="暗 ↔ 亮" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="伽马" Width="110" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="0.5" Maximum="3" Width="260" @bind-Value="_gamma" />
+							<TextBlock Text="@GammaText" Width="40" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+				@* 原版 Tab 名为 Aim（gameui_english: GameUI_Mouse = "Aim"）；每个复选框右侧带说明文字 *@
+				<TabItem Header="@("瞄准")">
+					<ScrollViewer>
+						<StackPanel Spacing="12" Margin="@("16,16")">
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<CheckBox @bind-IsChecked="_invertMouse" Width="140">反转鼠标</CheckBox>
+								<TextBlock Text="反转鼠标上下轴" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<CheckBox @bind-IsChecked="_mouseFilter" Width="140">鼠标滤波</CheckBox>
+								<TextBlock Text="平滑鼠标移动" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<CheckBox @bind-IsChecked="_autoAim" Width="140">自动瞄准</CheckBox>
+								<TextBlock Text="瞄准时自动对准附近目标" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<CheckBox @bind-IsChecked="_rawInput" Width="140">原始鼠标输入</CheckBox>
+								<TextBlock Text="直接读取鼠标数据" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<CheckBox @bind-IsChecked="_lowLatency" Width="140">降低输入延迟</CheckBox>
+								<TextBlock Text="减少输入延迟" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+							@* 原版灵敏度在页面底部：滑条 + 数字框 *@
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12" Margin="@("0,10,0,0")">
+								<TextBlock Text="瞄准灵敏度" Width="130" VerticalAlignment="VerticalAlignment.Center"
+								           Foreground="@("#C6D2DD")" />
+								<Slider Minimum="0.1" Maximum="20" Width="260" @bind-Value="_sensitivity" />
+								<TextBox Text="@SensitivityText" Width="56" IsReadOnly="true"
+								         TextAlignment="TextAlignment.Right" />
+							</StackPanel>
+						</StackPanel>
+					</ScrollViewer>
+				</TabItem>
+
+			<TabItem Header="@("键盘")">
+				<ScrollViewer>
+					<StackPanel Spacing="6" Margin="@("16,16")">
+						<TextBlock Text="选择操作后按下新键；Backspace 清除，Esc 取消。"
+						           FontSize="11" Foreground="@("#8C9CAC")" Margin="@("0,0,0,4")" />
+						@foreach (var g in s_binds.GroupBy(b => b.Group))
+						{
+							<TextBlock Text="@g.Key" FontWeight="FontWeight.SemiBold"
+							           Foreground="@("#E9EFF5")" Margin="@("0,10,0,2")" />
+							@foreach (var b in g)
+							{
+								<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+									<TextBlock Text="@b.Label" Width="120" VerticalAlignment="VerticalAlignment.Center"
+									           Foreground="@("#C6D2DD")" />
+									<ContentControl Focusable="true" Classes="keycapture" Width="145"
+									                OnPointerPressed="@((PointerPressedEventArgs e) => SlotPressed(b.Action, 0, e))"
+									                OnPointerWheelChanged="@((PointerWheelEventArgs e) => SlotWheel(b.Action, 0, e))"
+									                OnKeyDown="@((KeyEventArgs e) => SlotKeyDown(b.Action, 0, e))"
+									                OnLostFocus="@((FocusChangedEventArgs e) => SlotLostFocus(b.Action, 0))">
+										<Border Background="@(SlotBg(b.Action, 0))" BorderBrush="@(SlotBorder(b.Action, 0))"
+										        BorderThickness="1" CornerRadius="6" Padding="@("8,5")">
+											<TextBlock Text="@(SlotText(b.Action, 0))" Foreground="@(SlotColor(b.Action, 0))"
+											           HorizontalAlignment="HorizontalAlignment.Center" />
+										</Border>
+									</ContentControl>
+									<ContentControl Focusable="true" Classes="keycapture" Width="145"
+									                OnPointerPressed="@((PointerPressedEventArgs e) => SlotPressed(b.Action, 1, e))"
+									                OnPointerWheelChanged="@((PointerWheelEventArgs e) => SlotWheel(b.Action, 1, e))"
+									                OnKeyDown="@((KeyEventArgs e) => SlotKeyDown(b.Action, 1, e))"
+									                OnLostFocus="@((FocusChangedEventArgs e) => SlotLostFocus(b.Action, 1))">
+										<Border Background="@(SlotBg(b.Action, 1))" BorderBrush="@(SlotBorder(b.Action, 1))"
+										        BorderThickness="1" CornerRadius="6" Padding="@("8,5")">
+											<TextBlock Text="@(SlotText(b.Action, 1))" Foreground="@(SlotColor(b.Action, 1))"
+											           HorizontalAlignment="HorizontalAlignment.Center" />
+										</Border>
+									</ContentControl>
+								</StackPanel>
+							}
+						}
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
+			<TabItem Header="@("语音")">
+				<ScrollViewer>
+					<StackPanel Spacing="12" Margin="@("16,16")">
+						<CheckBox @bind-IsChecked="_voiceEnabled">启用游戏内语音</CheckBox>
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="麦克风音量" Width="130" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="0" Maximum="1" Value="0.5" Width="260" IsEnabled="false" />
+						</StackPanel>
+						<CheckBox IsEnabled="false">提升麦克风增益</CheckBox>
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="接收音量" Width="130" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="0" Maximum="1" Width="260" @bind-Value="_voiceReceive" />
+							<TextBlock Text="@VoiceReceiveText" Width="40" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+						<Button IsEnabled="false" Width="150" HorizontalAlignment="HorizontalAlignment.Left">测试麦克风</Button>
+							<TextBlock Text="发送音量、麦克风增益和测试需要引擎语音设备接口；当前插件接口未开放这些控制。"
+							           FontSize="11" Foreground="@("#8C9CAC")" TextWrapping="TextWrapping.Wrap" />
+						</StackPanel>
+					</ScrollViewer>
+				</TabItem>
+
+				@* 内容页（原 Tab 名 Content，OptionsSubAdvanced.res）：原始模型 / 插件内容 / 细节纹理 *@
+				<TabItem Header="@("内容")">
+					<ScrollViewer>
+						<StackPanel Spacing="12" Margin="@("16,16")">
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<CheckBox @bind-IsChecked="_originalModels" Width="150">启用原始模型</CheckBox>
+								<TextBlock Text="换回 1998 年发行时的低精度模型" FontSize="11" Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+								<CheckBox @bind-IsChecked="_addonsFolder" Width="150">允许自定义附加内容</CheckBox>
+								<TextBlock Text="允许 addons 目录的自定义内容（重启后生效）" FontSize="11"
+								           Foreground="@("#8C9CAC")" VerticalAlignment="VerticalAlignment.Center" />
+							</StackPanel>
+							<CheckBox @bind-IsChecked="_detailTextures">细节纹理</CheckBox>
+							<TextBlock Text="部分内容设置需要重启游戏才能生效" FontSize="11" Foreground="@("#8C9CAC")" />
+						</StackPanel>
+					</ScrollViewer>
+				</TabItem>
+			</TabControl>
+
+		<StackPanel Grid.Row="1" Orientation="Orientation.Horizontal"
+		            HorizontalAlignment="HorizontalAlignment.Right" Margin="12">
+			@* 恢复默认键位只对键盘页有意义，切到其它页时隐藏 *@
+			<Button OnClick="RestoreDefaults" Width="120" Height="34" Margin="@("0,0,8,0")"
+			        IsVisible="@(_tabIndex == s_keyboardTab)">恢复默认键位</Button>
+			<Button OnClick="Apply" Width="110" Height="34"
+			        Background="@("#4FA3E3")" Foreground="@("#0B1016")">应用</Button>
+		</StackPanel>
+	</Grid>
+</Border>
+
+@code {
+    // 准星颜色（原版 5 色，值为 cl_crosshair_color 的 "r g b"）
+    static readonly string[] s_crosshairColorValues = ["50 250 50", "250 50 50", "50 50 250", "250 250 50", "50 250 250"];
+    static readonly ImmutableArray<string> s_crosshairColorLabels = ["绿色", "红色", "蓝色", "黄色", "浅蓝色"];
+    static readonly string[] s_crosshairSizeValues = ["auto", "small", "medium", "large"];
+    static readonly ImmutableArray<string> s_crosshairSizeLabels = ["自动", "小", "中", "大"];
+    static readonly ImmutableArray<string> s_soundQualities = ["高", "低"];
+    // 喷漆颜色（原版 9 色，cl_logocolor 存 token，如 "#Valve_Orange"）
+    static readonly string[] s_logoColorTokens =
+    [
+        "#Valve_Orange", "#Valve_Yellow", "#Valve_Blue", "#Valve_Ltblue", "#Valve_Green",
+        "#Valve_Red", "#Valve_Brown", "#Valve_Ltgray", "#Valve_Dkgray"
+    ];
+    static readonly ImmutableArray<string> s_logoColorLabels =
+        ["橙色", "黄色", "蓝色", "浅蓝色", "绿色", "红色", "棕色", "浅灰色", "深灰色"];
+    // 各 token 的基色。喷漆图案（logos/*.bmp）本身是灰阶索引图，上墙颜色来自引擎用
+    // cl_logocolor 生成的“黑 → 基色”调色板（logos/remapped.bmp，实测严格线性），
+    // 所以预览只需按 索引/255 乘基色。橙色的值直接取自 remapped.bmp 调色板末项。
+    static readonly (byte R, byte G, byte B)[] s_logoColorValues =
+    [
+        (255, 119, 23), (255, 255, 0), (0, 0, 255), (0, 160, 255), (0, 255, 0),
+        (255, 0, 0), (150, 90, 50), (192, 192, 192), (64, 64, 64)
+    ];
+    // 高级选项 LIST 项（cstrike/user.scr INFO_OPTIONS）
+    static readonly string[] s_fastSpritesValues = ["0", "1", "2"];
+    static readonly ImmutableArray<string> s_fastSpritesLabels = ["最佳（最慢）", "中等", "最快（最差）"];
+    static readonly string[] s_handValues = ["0", "1"];
+    static readonly ImmutableArray<string> s_handLabels = ["左手", "右手"];
+    static readonly string[] s_buyMenuValues = ["0", "1"];
+    static readonly ImmutableArray<string> s_buyMenuLabels = ["旧式菜单", "VGUI 菜单"];
+    static readonly string[] s_radarValues = ["0", "1"];
+    static readonly ImmutableArray<string> s_radarLabels = ["透明", "纯色"];
+
+    // 标签页顺序：0 多人游戏 / 1 音频 / 2 视频 / 3 瞄准 / 4 键盘 / 5 语音 / 6 内容
+    const int s_keyboardTab = 4;
+    int _tabIndex;
+
+    string _name = "";
+    ImmutableArray<string> _logos = [];
+    Avalonia.Media.Imaging.Bitmap? _logoPreview;
+    string? _modLogosDir;
+    string? _valveLogosDir;
+    ImmutableArray<VideoMode> _allVideoModes = [];
+    ImmutableArray<VideoMode> _videoModes = [];
+    ImmutableArray<string> _videoModeLabels = [];
+    string _selectedLogo = "";
+    int _logoIndex;
+    int _logoColorIndex;
+    int _crosshairColorIndex;
+    int _crosshairSizeIndex;
+    int _soundQualityIndex;
+    int _videoModeIndex = -1;
+    VideoMode? _initialVideoMode;
+    bool? _initialWindowed;
+    bool? _windowed;
+    string _crosshairColor = "50 250 50";
+    string _crosshairSize = "auto";
+    float _pitchMagnitude = 0.022f;
+    double? _volume = 0.7;
+    double? _suitVolume = 0.25;
+    double? _mp3Volume = 0.5;
+    double? _sensitivity = 3;
+    double? _brightness = 1;
+    double? _gamma = 2.5;
+    double? _voiceReceive = 0.5;
+    bool? _crosshairTranslucent = true;
+    bool? _detailTextures = false;
+    bool? _originalModels = true;
+    bool? _addonsFolder = false;
+    bool _initialOriginalModels = true;
+    bool _initialAddonsFolder;
+    bool? _widescreenFov = false;
+    bool? _vsync = false;
+    bool? _textureFiltering = true;
+    bool? _shaders = true;
+    bool? _invertMouse = false;
+    bool? _mouseFilter = false;
+    bool? _autoAim = false;
+    bool? _rawInput = false;
+    bool? _lowLatency = false;
+    bool? _voiceEnabled = true;
+    // 高级选项（user.scr INFO_OPTIONS）：NUMBER 项为文本、LIST 项为下标、BOOL 项为复选
+    string _corpsestay = "600";
+    string _mpDecals = "300";
+    string _maxShells = "50";
+    string _maxSmokePuffs = "20";
+    readonly Dictionary<string, int> _advListIndex = new();
+    bool? _autoWeaponSwitch = true;
+    bool? _centerId = true;
+    bool? _autoHelp = true;
+    bool? _autoScreenshots = false;
+    bool? _observerCrosshair = false;
+
+    string SensitivityText => (_sensitivity ?? 3).ToString("0.#");
+
+    /// <summary>当前选中的分辨率文本，喂给 ComboBox.SelectedItem；-1 时为 null（不选中）</summary>
+    string? SelectedVideoModeLabel =>
+        _videoModeIndex >= 0 && _videoModeIndex < _videoModeLabels.Length ? _videoModeLabels[_videoModeIndex] : null;
+
+    string VolumeText => (_volume ?? 0.7).ToString("0.00");
+    string SuitVolumeText => (_suitVolume ?? 0.25).ToString("0.00");
+    string Mp3VolumeText => (_mp3Volume ?? 0.5).ToString("0.00");
+    string BrightnessText => (_brightness ?? 1).ToString("0.00");
+    string GammaText => (_gamma ?? 2.5).ToString("0.00");
+    string VoiceReceiveText => (_voiceReceive ?? 0.5).ToString("0.00");
+
+    static int ListIndex(string[] values, float v) =>
+        Math.Clamp(Array.IndexOf(values, v.ToString(System.Globalization.CultureInfo.InvariantCulture)), 0, values.Length - 1);
+
+    static string NumText(float v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+    static float ParseNum(string? s, float fallback) =>
+        float.TryParse(s, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : fallback;
+
+    record BindDef(string Group, string Action, string Label);
+
+    static readonly BindDef[] s_binds =
+    {
+        new("移动", "+forward", "前进"), new("移动", "+back", "后退"),
+        new("移动", "+left", "向左转"), new("移动", "+right", "向右转"),
+        new("移动", "+moveleft", "向左平移"), new("移动", "+moveright", "向右平移"),
+        new("移动", "+jump", "跳跃"), new("移动", "+duck", "蹲下"),
+        new("移动", "+moveup", "向上游"), new("移动", "+movedown", "向下游"),
+        new("移动", "+lookup", "抬头"), new("移动", "+lookdown", "低头"),
+        new("移动", "force_centerview", "视角居中"), new("移动", "+strafe", "平移修饰键"),
+        new("移动", "+mlook", "鼠标视角"), new("移动", "+klook", "键盘视角"),
+        new("通讯", "+voicerecord", "语音通讯"), new("通讯", "radio1", "标准无线电"),
+        new("通讯", "radio2", "团队无线电"), new("通讯", "radio3", "报告无线电"),
+        new("通讯", "+commandmenu", "游戏内指令菜单"), new("通讯", "messagemode", "聊天"),
+        new("通讯", "messagemode2", "团队聊天"),
+        new("菜单", "buy", "购买菜单"), new("菜单", "buyammo1", "购买主武器弹药"),
+        new("菜单", "buyammo2", "购买副武器弹药"), new("菜单", "buyequip", "购买装备"),
+        new("菜单", "autobuy", "自动购买"), new("菜单", "rebuy", "重新购买"),
+        new("菜单", "chooseteam", "选择队伍"), new("菜单", "slot10", "菜单选项 0"),
+        new("菜单", "slot1", "菜单选项 1"), new("菜单", "slot2", "菜单选项 2"),
+        new("菜单", "slot3", "菜单选项 3"), new("菜单", "slot4", "菜单选项 4"),
+        new("菜单", "slot5", "菜单选项 5"), new("菜单", "slot6", "菜单选项 6"),
+        new("菜单", "slot7", "菜单选项 7"), new("菜单", "slot8", "菜单选项 8"),
+        new("菜单", "slot9", "菜单选项 9"), new("菜单", "showbriefing", "任务简报"),
+        new("战斗", "+attack", "开火"), new("战斗", "+attack2", "特殊攻击"),
+        new("战斗", "+reload", "装弹"), new("战斗", "invprev", "上一件武器"),
+        new("战斗", "invnext", "下一件武器"), new("战斗", "lastinv", "上一件使用的武器"),
+        new("战斗", "nightvision", "夜视仪"), new("战斗", "drop", "丢弃武器"),
+        new("战斗", "+showscores", "显示比分"),
+        new("其他", "+use", "使用物品"), new("其他", "+speed", "行走"),
+        new("其他", "impulse 100", "手电筒"),
+        new("其他", "impulse 201", "喷漆"), new("其他", "snapshot", "截图"),
+        new("其他", "quit", "退出游戏"),
+    };
+
+    static readonly Dictionary<string, string[]> s_defaults = new()
+    {
+        ["+voicerecord"] = ["k"],
+        ["+forward"] = ["w", "uparrow"], ["+back"] = ["s", "downarrow"],
+        ["+left"] = ["leftarrow"], ["+right"] = ["rightarrow"],
+        ["+moveleft"] = ["a"], ["+moveright"] = ["d"],
+        ["+jump"] = ["space"], ["+duck"] = ["ctrl"], ["+moveup"] = ["v", "'"],
+        ["+movedown"] = ["/"], ["+lookup"] = ["pgup"], ["+lookdown"] = ["pgdn"],
+        ["force_centerview"] = ["end"], ["+strafe"] = ["alt"], ["+speed"] = ["shift"], ["+mlook"] = [";"],
+        ["+klook"] = ["ins"], ["messagemode"] = ["y"], ["messagemode2"] = ["u"],
+        ["+attack"] = ["mouse1", "enter"], ["+attack2"] = ["mouse2", "\\"],
+        ["+reload"] = ["r"], ["invprev"] = ["mwheelup", "["],
+        ["invnext"] = ["mwheeldown", "]"], ["lastinv"] = ["q"],
+        ["+showscores"] = ["tab"],
+        ["slot1"] = ["1"], ["slot2"] = ["2"], ["slot3"] = ["3"],
+        ["slot4"] = ["4"], ["slot5"] = ["5"], ["slot6"] = ["6"],
+        ["slot7"] = ["7"], ["slot8"] = ["8"], ["slot9"] = ["9"], ["slot10"] = ["0"],
+        ["drop"] = ["g"], ["nightvision"] = ["n"], ["impulse 100"] = ["f"],
+        ["impulse 201"] = ["t"], ["snapshot"] = ["f5"],
+        ["buy"] = ["b"], ["buyammo1"] = [","], ["buyammo2"] = ["."],
+        ["buyequip"] = ["o"], ["autobuy"] = ["f1"], ["rebuy"] = ["f2"],
+        ["chooseteam"] = ["m"], ["radio1"] = ["z"], ["radio2"] = ["x"],
+        ["radio3"] = ["c"], ["+commandmenu"] = ["h"], ["showbriefing"] = ["i"],
+        ["quit"] = ["f10"],
+    };
+
+    Dictionary<string, string> _slot1 = new();
+    Dictionary<string, string> _slot2 = new();
+    Dictionary<string, string> _orig1 = new();
+    Dictionary<string, string> _orig2 = new();
+    string? _captureAction;
+    int _captureSlot;
+
+    protected override void OnInitialized()
+    {
+        _name = EngineCommands.GetCvarString("name");
+        _crosshairColor = EngineCommands.GetCvarString("cl_crosshair_color", "50 250 50");
+        _crosshairColorIndex = FindIndex(s_crosshairColorValues, _crosshairColor);
+        _crosshairSize = NormalizeCrosshairSize(EngineCommands.GetCvarString("cl_crosshair_size", "auto"));
+        _crosshairSizeIndex = FindIndex(s_crosshairSizeValues, _crosshairSize);
+        _crosshairTranslucent = EngineCommands.GetCvarFloat("cl_crosshair_translucent", 1) != 0;
+        _originalModels = EngineCommands.GetCvarFloat("cl_himodels") == 0;
+        _initialOriginalModels = _originalModels == true;
+        _volume = EngineCommands.GetCvarFloat("volume", 0.7f);
+        _suitVolume = EngineCommands.GetCvarFloat("suitvolume", 0.25f);
+        _mp3Volume = EngineCommands.GetCvarFloat("MP3Volume", 0.5f);
+        _soundQualityIndex = EngineCommands.GetCvarFloat("hisound", 1) != 0 ? 0 : 1;
+        _brightness = EngineCommands.GetCvarFloat("brightness", 1);
+        _gamma = EngineCommands.GetCvarFloat("gamma", 2.5f);
+        _vsync = EngineCommands.GetCvarFloat("gl_vsync") != 0;
+        _widescreenFov = EngineCommands.GetCvarFloat("gl_widescreen_yfov") != 0;
+        _textureFiltering = EngineCommands.GetCvarFloat("r_prefertexturefiltering", 1) != 0;
+        _shaders = EngineCommands.GetCvarFloat("gl_use_shaders", 1) != 0;
+        _pitchMagnitude = Math.Max(0.001f, Math.Abs(EngineCommands.GetCvarFloat("m_pitch", 0.022f)));
+        _invertMouse = EngineCommands.GetCvarFloat("m_pitch", 0.022f) < 0;
+        _mouseFilter = EngineCommands.GetCvarFloat("m_filter") != 0;
+        _autoAim = EngineCommands.GetCvarFloat("sv_aim") != 0;
+        _rawInput = EngineCommands.GetCvarFloat("m_rawinput") != 0;
+        _lowLatency = EngineCommands.GetCvarFloat("gl_lowlatency") != 0;
+        _voiceEnabled = EngineCommands.GetCvarFloat("voice_modenable", 1) != 0;
+        _voiceReceive = EngineCommands.GetCvarFloat("voice_scale", 0.5f);
+        _detailTextures = EngineCommands.GetCvarFloat("r_detailtextures") != 0;
+        // 高级选项（user.scr INFO_OPTIONS）
+        _advListIndex.Clear();
+        _advListIndex["fastsprites"] = ListIndex(s_fastSpritesValues, EngineCommands.GetCvarFloat("fastsprites", 1));
+        _advListIndex["cl_righthand"] = ListIndex(s_handValues, EngineCommands.GetCvarFloat("cl_righthand", 1));
+        _advListIndex["_vgui_menus"] = ListIndex(s_buyMenuValues, EngineCommands.GetCvarFloat("_vgui_menus", 1));
+        _advListIndex["cl_radartype"] = ListIndex(s_radarValues, EngineCommands.GetCvarFloat("cl_radartype", 0));
+        _corpsestay = NumText(EngineCommands.GetCvarFloat("cl_corpsestay", 600));
+        _mpDecals = NumText(EngineCommands.GetCvarFloat("mp_decals", 300));
+        _maxShells = NumText(EngineCommands.GetCvarFloat("max_shells", 50));
+        _maxSmokePuffs = NumText(EngineCommands.GetCvarFloat("max_smokepuffs", 20));
+        _autoWeaponSwitch = EngineCommands.GetCvarFloat("_cl_autowepswitch", 1) != 0;
+        _centerId = EngineCommands.GetCvarFloat("hud_centerid", 1) != 0;
+        _autoHelp = EngineCommands.GetCvarFloat("_ah", 1) != 0;
+        _autoScreenshots = EngineCommands.GetCvarFloat("hud_takesshots", 0) != 0;
+        _observerCrosshair = EngineCommands.GetCvarFloat("cl_observercrosshair", 0) != 0;
+        LoadVideoModes();
+        LoadOptionLists();
+        LoadBinds();
+    }
+
+    void LoadVideoModes()
+    {
+        _initialVideoMode = VideoSettings.GetCurrentMode();
+        _initialWindowed = VideoSettings.IsWindowed();
+        _windowed = _initialWindowed;
+        _allVideoModes = VideoSettings.GetAvailableModes().ToImmutableArray();
+        RebuildVideoModeList();
+    }
+
+    // 分辨率列表跟随"宽屏视场"过滤：勾选只留 16:9，取消只留 4:3。1366x768 / 1360x768
+    // 这类显示器原生尺寸与标准 16:9 差不到 1%，按同档处理；16:10、5:4 等其它比例两档都不算
+    static bool MatchesAspect(VideoMode mode, bool widescreen) =>
+        widescreen
+            ? Math.Abs(mode.Width / (double)mode.Height - 16.0 / 9) < 0.02
+            : Math.Abs(mode.Width / (double)mode.Height - 4.0 / 3) < 0.02;
+
+    void RebuildVideoModeList()
+    {
+        // 基准：尚未"应用"的选择（没动过下拉时就是当前生效的分辨率）
+        VideoMode? reference = _videoModes.Length > 0 && _videoModeIndex >= 0 && _videoModeIndex < _videoModes.Length
+            ? _videoModes[_videoModeIndex]
+            : _initialVideoMode;
+
+        // 列表严格跟随勾选状态：勾选只留 16:9，取消只留 4:3
+        var widescreen = _widescreenFov == true;
+        _videoModes = _allVideoModes.Where(mode => MatchesAspect(mode, widescreen)).ToImmutableArray();
+        _videoModeLabels = _videoModes.Select(mode => mode.Label).ToImmutableArray();
+
+        if (_videoModes.Length == 0)
+            _videoModeIndex = -1;   // 该比例一档都没有（实际不会发生）
+        else if (reference is { } r)
+            // 拿基准高度去新列表就近选：切换勾选必然换比例，基准必不在新列表，
+            // 选中项因此总会跟着变；当前模式在同列表时宽度打平保证精确命中
+            _videoModeIndex = NearestByHeight(_videoModes, r);
+        else
+            _videoModeIndex = 0;    // 读不到当前分辨率也选第一项，下拉不留空
+    }
+
+    // 按高度就近选档，高度打平时再比宽度：1920x1080 切 4:3 时 1280x960 与 1600x1200
+    // 高度差同为 120，宽屏面板取 1600x1200 更合理
+    static int NearestByHeight(IReadOnlyList<VideoMode> modes, VideoMode reference)
+    {
+        var best = -1;
+        var bestHeightDiff = int.MaxValue;
+        var bestWidthDiff = int.MaxValue;
+        for (var i = 0; i < modes.Count; i++)
+        {
+            var heightDiff = Math.Abs(modes[i].Height - reference.Height);
+            var widthDiff = Math.Abs(modes[i].Width - reference.Width);
+            if (heightDiff < bestHeightDiff || (heightDiff == bestHeightDiff && widthDiff < bestWidthDiff))
+            {
+                best = i;
+                bestHeightDiff = heightDiff;
+                bestWidthDiff = widthDiff;
+            }
+        }
+        return best;
+    }
+
+    static int FindIndex(IReadOnlyList<string> values, string value)
+    {
+        for (var i = 0; i < values.Count; i++)
+        {
+            if (string.Equals(values[i], value, StringComparison.OrdinalIgnoreCase))
+                return i;
+        }
+        return 0;
+    }
+
+    static bool IsSafeGameToken(string? value) =>
+        !string.IsNullOrWhiteSpace(value)
+        && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
+
+    static string NormalizeCrosshairSize(string size) => size switch
+    {
+        "0" => "auto",
+        "1" => "small",
+        "2" => "medium",
+        "3" => "large",
+        _ => size.ToLowerInvariant()
+    };
+
+    void LoadOptionLists()
+    {
+        try
+        {
+            var gameDir = EngineCommands.GetGameDirectory();
+            if (gameDir == null)
+                return;
+
+            // 喷漆图案列表：mod 的 logos/ 优先，再并上 valve/logos（cstrike 目录里通常只有 remapped.bmp 调色板）
+            _modLogosDir = Path.Combine(gameDir, "logos");
+            var baseDir = Path.GetDirectoryName(gameDir);
+            _valveLogosDir = baseDir == null ? null : Path.Combine(baseDir, "valve", "logos");
+            _logos = ScanLogos();
+            _selectedLogo = EngineCommands.GetCvarString("cl_logofile");
+            if (IsSafeGameToken(_selectedLogo) && !_logos.Contains(_selectedLogo, StringComparer.OrdinalIgnoreCase))
+                _logos = _logos.Add(_selectedLogo);
+            _logoIndex = FindIndex(_logos, _selectedLogo);
+            // 先取颜色再生成预览：预览是按颜色重映射后的图，顺序反了会用错色
+            var logoColor = EngineCommands.GetCvarString("cl_logocolor", "#Valve_Orange");
+            _logoColorIndex = FindIndex(s_logoColorTokens, logoColor);
+            UpdateLogoPreview();
+
+            var addonDir = Path.Combine(Path.GetDirectoryName(gameDir) ?? gameDir,
+                Path.GetFileName(gameDir) + "_addon");
+            _addonsFolder = Directory.Exists(addonDir);
+            _initialAddonsFolder = _addonsFolder == true;
+        }
+        catch (Exception ex)
+        {
+            GoldSrcAvalonia.Log?.Invoke($"OptionsForm.LoadOptionLists failed: {ex}");
+        }
+    }
+
+    ImmutableArray<string> ScanLogos()
+    {
+        var names = new List<string>();
+        foreach (var dir in new[] { _modLogosDir, _valveLogosDir })
+        {
+            if (dir == null || !Directory.Exists(dir))
+                continue;
+            foreach (var file in Directory.GetFiles(dir, "*.bmp"))
+            {
+                var name = Path.GetFileNameWithoutExtension(file);
+                // remapped.bmp 是喷漆用的调色板，不是图案
+                if (name.Equals("remapped", StringComparison.OrdinalIgnoreCase) || !IsSafeGameToken(name))
+                    continue;
+                if (!names.Contains(name, StringComparer.OrdinalIgnoreCase))
+                    names.Add(name);
+            }
+        }
+        names.Sort(StringComparer.OrdinalIgnoreCase);
+        return [.. names];
+    }
+
+    void UpdateLogoPreview()
+    {
+        _logoPreview = null;
+        var name = _selectedLogo;
+        if (string.IsNullOrEmpty(name) || !IsSafeGameToken(name))
+            return;
+        var (r, g, b) = s_logoColorValues[Math.Clamp(_logoColorIndex, 0, s_logoColorValues.Length - 1)];
+        foreach (var dir in new[] { _modLogosDir, _valveLogosDir })
+        {
+            if (dir == null)
+                continue;
+            var bitmap = Plugin.Controls.GoldSrcLogo.LoadTinted(Path.Combine(dir, name + ".bmp"), r, g, b);
+            if (bitmap != null)
+            {
+                _logoPreview = bitmap;
+                return;
+            }
+        }
+    }
+
+    // —— 准星预览 ——
+    // 逆向 client.dll（HUD_DrawCrosshair）得到：准星是 4 根 1px 细条，臂长与中心间隙按
+    // screenW / 参考宽度 缩放；cl_crosshair_size 决定参考宽度（large 640 / medium 800 /
+    // small 1024，auto 按当前分辨率取），cl_crosshair_translucent 决定 alpha（120 / 255），
+    // cl_crosshair_color 是 "r g b"。这里按同一套比例画到 120x120 的画布上
+    const int s_chCanvas = 120;
+    const int s_chArmBase = 6;
+    const int s_chGapBase = 3;
+
+    sealed record CrosshairBar(double W, double H, Avalonia.Thickness Offset);
+
+    // Blazonia 的 Background/Fill 参数是 OneOf<IBrush, Color, string>，直接给 "#AARRGGBB" 字符串
+    string CrosshairColorText
+    {
+        get
+        {
+            var (r, g, b) = ParseCrosshairColor(_crosshairColor);
+            var a = _crosshairTranslucent == true ? (byte)120 : (byte)255;
+            return $"#{a:X2}{r:X2}{g:X2}{b:X2}";
+        }
+    }
+
+    IReadOnlyList<CrosshairBar> CrosshairBars
+    {
+        get
+        {
+            var (screenW, _) = GoldSrcAvalonia.ScreenSize;
+            if (screenW <= 0)
+                screenW = 1024;
+
+            var refW = _crosshairSize switch
+            {
+                "small" => 1024,
+                "medium" => 800,
+                "large" => 640,
+                _ => screenW <= 640 ? 1024 : screenW >= 1024 ? 640 : 800
+            };
+
+            // 与游戏 1:1：引擎里就是 4 根 1px 的细条，臂长/间隙 = 基数 * screenW / 参考宽度（整数除法）。
+            // 不能按画布把准星"放大到填满"，那样预览会比实际大，而且大/中/小会被归一成同一尺寸
+            var arm = Math.Max(1, s_chArmBase * screenW / refW);
+            var gap = Math.Max(1, s_chGapBase * screenW / refW);
+            var c = s_chCanvas / 2;
+            // 引擎的条一律 1px 粗，坐标取整，避免半像素被抗锯齿糊开
+            return
+            [
+                new CrosshairBar(arm, 1, new Avalonia.Thickness(c - gap - arm, c, 0, 0)),
+                new CrosshairBar(arm, 1, new Avalonia.Thickness(c + gap, c, 0, 0)),
+                new CrosshairBar(1, arm, new Avalonia.Thickness(c, c - gap - arm, 0, 0)),
+                new CrosshairBar(1, arm, new Avalonia.Thickness(c, c + gap, 0, 0))
+            ];
+        }
+    }
+
+    static (byte R, byte G, byte B) ParseCrosshairColor(string? value)
+    {
+        var parts = (value ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length < 3)
+            return (50, 250, 50);
+
+        static byte Component(string s)
+            => byte.TryParse(s, out var v) ? (v > 255 ? (byte)255 : (byte)v) : (byte)0;
+
+        return (Component(parts[0]), Component(parts[1]), Component(parts[2]));
+    }
+
+    void OnTabChanged(Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        if (e.Source is Avalonia.Controls.TabControl tc && tc.SelectedIndex >= 0)
+            _tabIndex = tc.SelectedIndex;
+        StateHasChanged();
+    }
+
+    void OnLogoSelected(Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        _selectedLogo = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() ?? "" : "";
+        _logoIndex = FindIndex(_logos, _selectedLogo);
+        UpdateLogoPreview();
+        StateHasChanged();
+    }
+
+    void OnLogoColorSelected(Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        var label = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+        if (label == null)
+            return;
+        _logoColorIndex = s_logoColorLabels.IndexOf(label);
+        if (_logoColorIndex < 0)
+            return;
+        // 颜色变了要重出预览图，否则图案还是上一次的颜色
+        UpdateLogoPreview();
+        StateHasChanged();
+    }
+
+    void OnCrosshairColorSelected(Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        var label = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+        if (label == null)
+            return;
+        _crosshairColorIndex = s_crosshairColorLabels.IndexOf(label);
+        if (_crosshairColorIndex >= 0)
+            _crosshairColor = s_crosshairColorValues[_crosshairColorIndex];
+    }
+
+    void OnCrosshairSizeSelected(Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        var label = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+        if (label == null)
+            return;
+        _crosshairSizeIndex = s_crosshairSizeLabels.IndexOf(label);
+        if (_crosshairSizeIndex >= 0)
+            _crosshairSize = s_crosshairSizeValues[_crosshairSizeIndex];
+    }
+
+    void OnSoundQualitySelected(Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        var quality = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+        if (quality != null)
+            _soundQualityIndex = s_soundQualities.IndexOf(quality);
+    }
+
+    void OnVideoModeSelected(Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        var label = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+        if (label != null)
+            _videoModeIndex = _videoModeLabels.IndexOf(label);
+    }
+
+    void OnWidescreenFovChanged(bool? value)
+    {
+        _widescreenFov = value;
+        RebuildVideoModeList();
+        StateHasChanged();
+    }
+
+    /// <summary>高级选项 LIST 项共用的选择回调（cvar → 下标）</summary>
+    void OnAdvListSelected(string cvar, Avalonia.Controls.SelectionChangedEventArgs e)
+    {
+        var labels = cvar switch
+        {
+            "fastsprites" => s_fastSpritesLabels,
+            "cl_righthand" => s_handLabels,
+            "_vgui_menus" => s_buyMenuLabels,
+            _ => s_radarLabels,
+        };
+        var label = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+        if (label != null)
+            _advListIndex[cvar] = labels.IndexOf(label);
+    }
+
+    void LoadBinds()
+    {
+        foreach (var b in s_binds)
+        {
+            var keys = SavedGameConfig.GetBinds(b.Action);
+            _slot1[b.Action] = keys.Count > 0 ? keys[0] : "";
+            _slot2[b.Action] = keys.Count > 1 ? keys[1] : "";
+            _orig1[b.Action] = _slot1[b.Action];
+            _orig2[b.Action] = _slot2[b.Action];
+        }
+    }
+
+    bool IsCapturing(string action, int slot) => _captureAction == action && _captureSlot == slot;
+
+    string SlotText(string action, int slot)
+    {
+        if (IsCapturing(action, slot))
+            return "按下按键…";
+        var key = (slot == 0 ? _slot1 : _slot2).GetValueOrDefault(action, "");
+        return key.Length > 0 ? key : "未绑定";
+    }
+
+    string SlotColor(string action, int slot) =>
+        IsCapturing(action, slot) ? "#6FBAF5" : "#E9EFF5";
+
+    string SlotBg(string action, int slot) =>
+        IsCapturing(action, slot) ? "#24405C" : "#263140";
+
+    string SlotBorder(string action, int slot) =>
+        IsCapturing(action, slot) ? "#4FA3E3" : "#2A3644";
+
+    void SlotPressed(string action, int slot, PointerPressedEventArgs e)
+    {
+        if (IsCapturing(action, slot))
+        {
+            var props = e.GetCurrentPoint(null).Properties;
+            SetSlot(action, slot, props.IsMiddleButtonPressed ? "mouse3"
+                : props.IsRightButtonPressed ? "mouse2" : "mouse1");
+            e.Handled = true;
+        }
+        else
+        {
+            _captureAction = action;
+            _captureSlot = slot;
+        }
+    }
+
+    void SlotWheel(string action, int slot, PointerWheelEventArgs e)
+    {
+        if (!IsCapturing(action, slot))
+            return;
+        SetSlot(action, slot, e.Delta.Y > 0 ? "mwheelup" : "mwheeldown");
+        e.Handled = true;
+    }
+
+    void SlotKeyDown(string action, int slot, KeyEventArgs e)
+    {
+        if (!IsCapturing(action, slot))
+            return;
+        if (e.Key == Key.Escape)
+            _captureAction = null;
+        else if (e.Key == Key.Back)
+            SetSlot(action, slot, "");
+        else if (MapKeyName(e.Key) is { } name)
+            SetSlot(action, slot, name);
+        e.Handled = true;
+    }
+
+    void SlotLostFocus(string action, int slot)
+    {
+        if (IsCapturing(action, slot))
+            _captureAction = null;
+    }
+
+    void SetSlot(string action, int slot, string key)
+    {
+        if (key.Length > 0)
+        {
+            foreach (var b in s_binds)
+            {
+                for (var index = 0; index < 2; index++)
+                {
+                    if (b.Action == action && index == slot)
+                        continue;
+                    var target = index == 0 ? _slot1 : _slot2;
+                    if (string.Equals(target.GetValueOrDefault(b.Action, ""), key, StringComparison.OrdinalIgnoreCase))
+                        target[b.Action] = "";
+                }
+            }
+        }
+        (slot == 0 ? _slot1 : _slot2)[action] = key;
+        _captureAction = null;
+    }
+
+    static string? MapKeyName(Key key)
+    {
+        var name = key.ToString();
+        switch (name)
+        {
+            case "Space": return "space";
+            case "Enter": case "Return": return "enter";
+            case "Tab": return "tab";
+            case "LeftShift": case "RightShift": return "shift";
+            case "LeftCtrl": case "RightCtrl": return "ctrl";
+            case "LeftAlt": case "RightAlt": return "alt";
+            case "Up": return "uparrow";
+            case "Down": return "downarrow";
+            case "Left": return "leftarrow";
+            case "Right": return "rightarrow";
+            case "Insert": return "ins";
+            case "Delete": return "del";
+            case "Home": return "home";
+            case "End": return "end";
+            case "PageUp": return "pgup";
+            case "PageDown": return "pgdn";
+            case "OemComma": return ",";
+            case "OemPeriod": return ".";
+            case "OemMinus": return "-";
+            case "OemPlus": return "=";
+            case "Oem1": return ";";
+            case "Oem2": return "/";
+            case "Oem3": return "`";
+            case "Oem4": return "[";
+            case "Oem5": return "\\";
+            case "Oem6": return "]";
+            case "Oem7": return "'";
+        }
+        if (name.Length == 1 && name[0] is >= 'A' and <= 'Z')
+            return char.ToLowerInvariant(name[0]).ToString();
+        if (name.Length == 2 && name[0] == 'D' && name[1] is >= '0' and <= '9')
+            return name[1].ToString();
+        if (name.Length >= 2 && name[0] == 'F' && int.TryParse(name.AsSpan(1), out var f) && f is >= 1 and <= 12)
+            return "f" + f;
+        return null;
+    }
+
+    void ApplyBinds()
+    {
+        foreach (var b in s_binds)
+        {
+            foreach (var (oldKey, newKey) in Pairs(b.Action))
+            {
+                if (oldKey.Length > 0 && !string.Equals(oldKey, newKey, StringComparison.OrdinalIgnoreCase))
+                    EngineCommands.ClientCmd($"unbind \"{oldKey}\"");
+            }
+        }
+        foreach (var b in s_binds)
+        {
+            foreach (var (oldKey, newKey) in Pairs(b.Action))
+            {
+                if (newKey.Length > 0 && !string.Equals(oldKey, newKey, StringComparison.OrdinalIgnoreCase))
+                    EngineCommands.ClientCmd($"bind \"{newKey}\" \"{b.Action}\"");
+            }
+            _orig1[b.Action] = _slot1.GetValueOrDefault(b.Action, "");
+            _orig2[b.Action] = _slot2.GetValueOrDefault(b.Action, "");
+        }
+    }
+
+    IEnumerable<(string Old, string New)> Pairs(string action)
+    {
+        yield return (_orig1.GetValueOrDefault(action, ""), _slot1.GetValueOrDefault(action, ""));
+        yield return (_orig2.GetValueOrDefault(action, ""), _slot2.GetValueOrDefault(action, ""));
+    }
+
+    void Apply()
+    {
+        var playerName = (_name ?? "").Trim().Replace("\"", "").Replace(";", " ");
+        EngineCommands.SetCvar("name", playerName);
+        EngineCommands.SetCvar("cl_crosshair_color", _crosshairColor);
+        EngineCommands.SetCvar("cl_crosshair_size", _crosshairSize);
+        EngineCommands.SetCvarFloat("cl_crosshair_translucent", _crosshairTranslucent == true ? 1 : 0);
+        if (IsSafeGameToken(_selectedLogo))
+            EngineCommands.SetCvar("cl_logofile", _selectedLogo);
+        EngineCommands.SetCvar("cl_logocolor", s_logoColorTokens[Math.Clamp(_logoColorIndex, 0, s_logoColorTokens.Length - 1)]);
+
+        // 高级选项（user.scr INFO_OPTIONS）
+        EngineCommands.SetCvarFloat("cl_corpsestay", ParseNum(_corpsestay, 600));
+        EngineCommands.SetCvarFloat("mp_decals", ParseNum(_mpDecals, 300));
+        EngineCommands.SetCvarFloat("max_shells", ParseNum(_maxShells, 50));
+        EngineCommands.SetCvarFloat("max_smokepuffs", ParseNum(_maxSmokePuffs, 20));
+        EngineCommands.SetCvarFloat("fastsprites", ParseNum(s_fastSpritesValues[ListSel("fastsprites", s_fastSpritesValues.Length)], 1));
+        EngineCommands.SetCvarFloat("cl_righthand", ParseNum(s_handValues[ListSel("cl_righthand", s_handValues.Length)], 1));
+        var vguiMenus = s_buyMenuValues[ListSel("_vgui_menus", s_buyMenuValues.Length)];
+        EngineCommands.SetCvarFloat("_vgui_menus", ParseNum(vguiMenus, 1));
+        EngineCommands.ClientCmd($"setinfo _vgui_menus {vguiMenus}");   // user.scr 标记 SetInfo 的项同步上报
+        EngineCommands.SetCvarFloat("_cl_autowepswitch", _autoWeaponSwitch == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("hud_centerid", _centerId == true ? 1 : 0);
+        var autoHelp = _autoHelp == true ? 1 : 0;
+        EngineCommands.SetCvarFloat("_ah", autoHelp);
+        EngineCommands.ClientCmd($"setinfo _ah {autoHelp}");
+        EngineCommands.SetCvarFloat("hud_takesshots", _autoScreenshots == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("cl_observercrosshair", _observerCrosshair == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("cl_radartype", ParseNum(s_radarValues[ListSel("cl_radartype", s_radarValues.Length)], 0));
+
+        EngineCommands.SetCvarFloat("volume", (float)(_volume ?? 0.7));
+        EngineCommands.SetCvarFloat("suitvolume", (float)(_suitVolume ?? 0.25));
+        EngineCommands.SetCvarFloat("MP3Volume", (float)(_mp3Volume ?? 0.5));
+        EngineCommands.SetCvarFloat("hisound", _soundQualityIndex == 0 ? 1 : 0);
+
+        EngineCommands.SetCvarFloat("brightness", (float)(_brightness ?? 1));
+        EngineCommands.SetCvarFloat("gamma", (float)(_gamma ?? 2.5));
+        EngineCommands.SetCvarFloat("gl_vsync", _vsync == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("gl_widescreen_yfov", _widescreenFov == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("r_prefertexturefiltering", _textureFiltering == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("gl_use_shaders", _shaders == true ? 1 : 0);
+        ApplyVideoMode();
+
+        EngineCommands.SetCvarFloat("sensitivity", (float)(_sensitivity ?? 3));
+        EngineCommands.SetCvarFloat("m_pitch", _invertMouse == true ? -_pitchMagnitude : _pitchMagnitude);
+        EngineCommands.SetCvarFloat("m_filter", _mouseFilter == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("sv_aim", _autoAim == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("m_rawinput", _rawInput == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("gl_lowlatency", _lowLatency == true ? 1 : 0);
+
+        EngineCommands.SetCvarFloat("voice_modenable", _voiceEnabled == true ? 1 : 0);
+        EngineCommands.SetCvarFloat("voice_scale", (float)(_voiceReceive ?? 0.5));
+        EngineCommands.SetCvarFloat("r_detailtextures", _detailTextures == true ? 1 : 0);
+        if (_originalModels == true != _initialOriginalModels)
+            EngineCommands.ClientCmd($"_sethdmodels {(_originalModels == true ? 0 : 1)}");
+        if (_addonsFolder == true != _initialAddonsFolder)
+            EngineCommands.ClientCmd($"_setaddons_folder {(_addonsFolder == true ? 1 : 0)}");
+
+        ApplyBinds();
+        EngineCommands.SaveSettings();
+    }
+
+    int ListSel(string cvar, int count) => Math.Clamp(_advListIndex.GetValueOrDefault(cvar, 0), 0, count - 1);
+
+    void ApplyVideoMode()
+    {
+        if (_videoModeIndex < 0 || _videoModeIndex >= _videoModes.Length)
+            return;
+        if (_windowed is not { } windowed)
+            return;
+
+        var selected = _videoModes[_videoModeIndex];
+        if (selected == _initialVideoMode && windowed == _initialWindowed)
+            return;
+
+        EngineCommands.ClientCmd($"_setvideomode {selected.Width} {selected.Height} {selected.BitsPerPixel}");
+        EngineCommands.ClientCmd($"_setrenderer gl {(windowed ? "windowed" : "fullscreen")}");
+        _initialVideoMode = selected;
+        _initialWindowed = windowed;
+    }
+
+    void RestoreDefaults()
+    {
+        foreach (var b in s_binds)
+        {
+            foreach (var key in new[] { _orig1.GetValueOrDefault(b.Action, ""), _orig2.GetValueOrDefault(b.Action, "") })
+            {
+                if (key.Length > 0)
+                    EngineCommands.ClientCmd($"unbind \"{key}\"");
+            }
+            var defaults = s_defaults.GetValueOrDefault(b.Action, []);
+            _slot1[b.Action] = defaults.Length > 0 ? defaults[0] : "";
+            _slot2[b.Action] = defaults.Length > 1 ? defaults[1] : "";
+            _orig1[b.Action] = "";
+            _orig2[b.Action] = "";
+        }
+        ApplyBinds();
+        EngineCommands.SaveSettings();
+    }
+}

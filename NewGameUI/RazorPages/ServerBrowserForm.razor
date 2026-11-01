@@ -1,0 +1,1406 @@
+@* 服务器浏览器：复刻原版 platform/servers/ServerBrowser.dll 的功能（页签布局沿用本项目 tab 样式）。
+   布局来源：Servers/DialogServerBrowser.res（GameTabs + StatusLabel）、
+   servers/InternetGamesPage.res（gamelist + Connect/RefreshAll/RefreshQuick/AddServer/AddCurrentServer
+   + 调整过滤器 ToggleButton + FilterString）、servers/InternetGamesPage_Filters.res（Game/Map/Ping/Secure
+   + Location 过滤器，以及“已经有玩家在游戏 / 服务器没有满 / 没有密码保护”复选框）、
+   servers/DialogGameInfo.res（服务器信息：名称/游戏/IP地址/地图/玩家/延迟/VAC + 玩家列表 + 自动重试）、
+   servers/DialogAddServer.res（添加服务器）、servers/DialogServerPassword.res（进入需要密码的服务器）。
+   页签与顺序按 ServerBrowser.dll 的 AddPage：互联网 / 我喜爱的 / 历史记录 / 观看 / 局域网 / 朋友
+   （#ServerBrowser_InternetTab / FavoritesTab / HistoryTab / SpectateTab / LanTab / FriendsTab）。
+   列表用 Avalonia ListBox 承载(行高固定 24,样式见 MainMenuWindow.axaml 的 ListBox.serverlist)。
+   性能:列表只绑显示窗口(默认 300 行,"显示更多"按需扩)——Blazonia 的行宿主对 Template 参数
+   不做 diff、父组件每次渲染都会对所有已实现行重执行模板片段,且条目根只增不减
+   (DataTemplateItemComponent/DataTemplateItemsComponent 反编译确认),1600+ 行直绑会越用越卡。
+   全量数据(过滤/排序/上限 2000)都在 _all 上,状态栏计数显示全量。
+   数据全部走 Steam 的 ISteamMatchmakingServers002（与 ServerBrowser.dll 同一条路径，
+   见 Engine/Steam/SteamServers.cs），加入用 `connect ip:port`。 *@
+@using System.Collections.ObjectModel
+@using System.ComponentModel
+@using Avalonia.Controls.Templates
+@using Avalonia.Data
+@using Avalonia.Threading
+@using Avalonia.VisualTree
+@using Plugin.Engine.Steam
+@using Plugin.Views
+@implements IDisposable
+
+<Border Background="@("#161D26")" CornerRadius="12"
+        BorderBrush="@("#2A3644")" BorderThickness="1"
+        Padding="@("16,12")" Margin="20">
+	<Panel>
+		<Grid RowDefinitions="@("Auto,*,Auto")">
+
+			@* —— 页签（原版 GameTabs / PropertySheet）—— *@
+			<StackPanel Grid.Row="0" Orientation="Orientation.Horizontal" Spacing="4">
+				@foreach (var tab in s_tabs)
+				{
+					<Button Width="104" Height="30" CornerRadius="6"
+					        Background="@(tab == _tab ? "#26374A" : "#1B242F")"
+					        Foreground="@(tab == _tab ? "#E9EFF5" : "#A9B7C6")"
+					        OnClick="@(() => OnTabClick(tab))">@TabLabel(tab)</Button>
+				}
+			</StackPanel>
+
+			@* —— 列表（原版 gamelist / ListPanel）：表头 + 虚拟化列表 —— *@
+			<Border Grid.Row="1" Background="@("#0F151B")" CornerRadius="6" Margin="@("0,8,0,8")"
+			        BorderBrush="@("#2A3644")" BorderThickness="1">
+				<Grid RowDefinitions="@("Auto,*")">
+					@* 表头：列头可点，原版 ListPanel::SetSortFunc（点同一列切换升降序）—— *@
+					<Border Grid.Row="0" Background="@("#1B242F")" Padding="@("8,6")">
+						<Grid ColumnDefinitions="@(ColumnDefs)">
+							<Button Grid.Column="0" OnClick="@(() => SortBy(SortColumn.Name))" Height="22" Padding="@("0")"
+							        FontSize="11" Background="@("Transparent")" HorizontalContentAlignment="HorizontalAlignment.Left"
+							        Foreground="@SortColor(SortColumn.Name)">@SortLabel("服务器", SortColumn.Name)</Button>
+							<Button Grid.Column="1" OnClick="@(() => SortBy(SortColumn.Game))" Height="22" Padding="@("0")"
+							        FontSize="11" Background="@("Transparent")" HorizontalContentAlignment="HorizontalAlignment.Left"
+							        Foreground="@SortColor(SortColumn.Game)">@SortLabel("游戏", SortColumn.Game)</Button>
+							<Button Grid.Column="2" OnClick="@(() => SortBy(SortColumn.Players))" Height="22" Padding="@("0")"
+							        FontSize="11" Background="@("Transparent")" HorizontalContentAlignment="HorizontalAlignment.Left"
+							        Foreground="@SortColor(SortColumn.Players)">@SortLabel("玩家", SortColumn.Players)</Button>
+							<Button Grid.Column="3" OnClick="@(() => SortBy(SortColumn.Map))" Height="22" Padding="@("0")"
+							        FontSize="11" Background="@("Transparent")" HorizontalContentAlignment="HorizontalAlignment.Left"
+							        Foreground="@SortColor(SortColumn.Map)">@SortLabel("地图", SortColumn.Map)</Button>
+							@if (_tab == BrowserTab.History)
+							{
+								<Button Grid.Column="4" OnClick="@(() => SortBy(SortColumn.LastPlayed))" Height="22" Padding="@("0")"
+								        FontSize="11" Background="@("Transparent")" HorizontalContentAlignment="HorizontalAlignment.Left"
+								        Foreground="@SortColor(SortColumn.LastPlayed)">@SortLabel("最后运行日期", SortColumn.LastPlayed)</Button>
+							}
+							<Button Grid.Column="@(PingColumnIndex)" OnClick="@(() => SortBy(SortColumn.Ping))" Height="22" Padding="@("0")"
+							        FontSize="11" Background="@("Transparent")" HorizontalContentAlignment="HorizontalAlignment.Left"
+							        Foreground="@SortColor(SortColumn.Ping)">@SortLabel("延迟", SortColumn.Ping)</Button>
+							<TextBlock Grid.Column="@(PingColumnIndex + 1)" Text="标记" FontSize="11" Foreground="@("#8C9CAC")"
+							           VerticalAlignment="VerticalAlignment.Center" />
+						</Grid>
+					</Border>
+
+					<Panel Grid.Row="1" Margin="@("0,2,0,0")">
+						@* 列表 = 原生 Avalonia ListBox(ServerListView 桥):整棵列表在 Blazor 渲染树之外,
+						   行模板是纯 FuncDataTemplate + 数据绑定(真虚拟化,只有可视区行存在),
+						   父页面 StateHasChanged 完全不触达行控件。样式复用 MainMenuWindow.axaml
+						   的 ListBox.serverlist(行高 24/悬停/选中),行模板/事件/右键菜单
+						   在 OnAfterRender 与 RebuildMenu 里配置。 *@
+						<ServerListView @ref="_listView" />
+
+						@if (_all.Count > _rows.Count)
+						{
+							<Button OnClick="ShowMore" Width="230" Height="26" CornerRadius="6"
+							        HorizontalAlignment="HorizontalAlignment.Center"
+							        VerticalAlignment="VerticalAlignment.Bottom" Margin="@("0,0,0,4")"
+							        Background="@("#263140")" Foreground="@("#DCE6EF")">显示更多(还有 @(_all.Count - _rows.Count) 条)</Button>
+						}
+						@if (_all.Count == 0)
+						{
+							<TextBlock Text="@_emptyText" Margin="@("10,12")" FontSize="12" Foreground="@("#8C9CAC")"
+							           IsHitTestVisible="false" VerticalAlignment="VerticalAlignment.Top" />
+						}
+					</Panel>
+				</Grid>
+			</Border>
+
+			@* —— 底部：过滤器展开区 + 按钮行 + 状态 —— *@
+			<StackPanel Grid.Row="2" Spacing="6">
+
+				@if (_filtersOpen)
+				{
+					<Border Background="@("#121A22")" CornerRadius="6" Padding="@("10,8")"
+					        BorderBrush="@("#2A3644")" BorderThickness="1">
+						<StackPanel Spacing="6">
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="8">
+								<TextBlock Text="游戏" Width="44" FontSize="12" Foreground="@("#A9B7C6")"
+								           VerticalAlignment="VerticalAlignment.Center" />
+								<ComboBox T="string" ItemsSource="@s_gameOptions" Width="164"
+								          SelectedIndex="@_gameFilterIndex" OnSelectionChanged="OnGameFilterChanged" />
+								<TextBlock Text="区域" Width="72" FontSize="12" Foreground="@("#A9B7C6")"
+								           VerticalAlignment="VerticalAlignment.Center" />
+								<ComboBox T="string" ItemsSource="@s_regions" Width="112"
+								          SelectedIndex="@_regionIndex" OnSelectionChanged="OnRegionChanged" />
+								<CheckBox @bind-IsChecked="_filterNotEmpty">已经有玩家在游戏</CheckBox>
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="8">
+								<TextBlock Text="地图" Width="44" FontSize="12" Foreground="@("#A9B7C6")"
+								           VerticalAlignment="VerticalAlignment.Center" />
+								<TextBox @bind-Text="_mapFilter" Width="164" />
+								<TextBlock Text="延迟" Width="72" FontSize="12" Foreground="@("#A9B7C6")"
+								           VerticalAlignment="VerticalAlignment.Center" />
+								<ComboBox T="string" ItemsSource="@s_pingOptions" Width="112"
+								          SelectedIndex="@_pingFilterIndex" OnSelectionChanged="OnPingFilterChanged" />
+								<CheckBox @bind-IsChecked="_filterNotFull">服务器没有满</CheckBox>
+							</StackPanel>
+							<StackPanel Orientation="Orientation.Horizontal" Spacing="8">
+								<TextBlock Text="反作弊" Width="44" FontSize="12" Foreground="@("#A9B7C6")"
+								           VerticalAlignment="VerticalAlignment.Center" />
+								<ComboBox T="string" ItemsSource="@s_secureOptions" Width="164"
+								          SelectedIndex="@_secureFilterIndex" OnSelectionChanged="OnSecureFilterChanged" />
+								<CheckBox @bind-IsChecked="_filterNoPassword">没有密码保护</CheckBox>
+							</StackPanel>
+						</StackPanel>
+					</Border>
+				}
+
+				<StackPanel Orientation="Orientation.Horizontal" Spacing="8">
+					<Button OnClick="@(() => ToggleFilters())" Width="108" Height="28" CornerRadius="6"
+					        Background="@("#263140")" Foreground="@("#DCE6EF")">调整过滤器</Button>
+					<TextBlock Text="@_filterSummary" FontSize="11" Foreground="@("#7E8C9B")" Width="200"
+					           VerticalAlignment="VerticalAlignment.Center" TextTrimming="TextTrimming.CharacterEllipsis" />
+					<Button OnClick="@(() => QuickRefresh())" IsEnabled="@(_query != null)" Width="105" Height="28" CornerRadius="6"
+					        Background="@("#263140")" Foreground="@("#DCE6EF")">快速刷新</Button>
+					<Button OnClick="@(() => OnRefreshButton())" Width="95" Height="28" CornerRadius="6"
+					        Background="@("#263140")" Foreground="@("#DCE6EF")">@(_refreshing ? "停止刷新" : "刷新全部")</Button>
+					<Button OnClick="@(() => OpenAddServer())" Width="95" Height="28" CornerRadius="6"
+					        Background="@("#263140")" Foreground="@("#DCE6EF")">添加服务器</Button>
+					<Button OnClick="@(() => AddSelectedToFavorites())" IsEnabled="@(_selected != null)" Width="128" Height="28"
+					        CornerRadius="6" Background="@("#263140")" Foreground="@("#DCE6EF")">添加当前服务器</Button>
+					<Button OnClick="@(() => ConnectSelected())" IsEnabled="@(_selected != null)" Width="75" Height="28"
+					        CornerRadius="6" Background="@("#4FA3E3")" Foreground="@("#0B1016")">连接</Button>
+				</StackPanel>
+
+				<TextBlock Text="@_status" FontSize="11" Foreground="@("#8C9CAC")" TextTrimming="TextTrimming.CharacterEllipsis" />
+			</StackPanel>
+		</Grid>
+
+		@* —— 服务器信息模态（原版 CDialogGameInfo：Servers/DialogGameInfo.res）—— *@
+		<Border Background="@("#B4000000")" IsVisible="@_infoOpen">
+			<Border Background="@("#161D26")" BorderBrush="@("#2A3644")" BorderThickness="1" CornerRadius="8"
+			        Width="560" Padding="@("18,14")" HorizontalAlignment="HorizontalAlignment.Center"
+			        VerticalAlignment="VerticalAlignment.Center">
+				<StackPanel Spacing="8">
+					<TextBlock Text="游戏信息" FontSize="14" Foreground="@("#E9EFF5")" />
+
+					<Grid ColumnDefinitions="@("88,*")" RowDefinitions="@("Auto,Auto,Auto,Auto,Auto,Auto")" RowSpacing="4">
+						<TextBlock Grid.Row="0" Grid.Column="0" Text="名称：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="0" Grid.Column="1" Text="@(_server?.Item.ServerName ?? "")" FontSize="12"
+						           Foreground="@("#E9EFF5")" TextTrimming="TextTrimming.CharacterEllipsis" />
+						<TextBlock Grid.Row="1" Grid.Column="0" Text="游戏：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="1" Grid.Column="1" Text="@(_server?.Game ?? "")" FontSize="12" Foreground="@("#DCE6EF")" />
+						<TextBlock Grid.Row="2" Grid.Column="0" Text="IP地址：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="2" Grid.Column="1" Text="@(_server?.Item.Address ?? "")" FontSize="12"
+						           Foreground="@("#DCE6EF")" />
+						<TextBlock Grid.Row="3" Grid.Column="0" Text="地图：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="3" Grid.Column="1" Text="@(_server?.Item.Map ?? "")" FontSize="12"
+						           Foreground="@("#DCE6EF")" />
+						<TextBlock Grid.Row="4" Grid.Column="0" Text="玩家：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="4" Grid.Column="1" Text="@(_server?.Item.PlayersText ?? "")" FontSize="12"
+						           Foreground="@("#DCE6EF")" />
+						<TextBlock Grid.Row="5" Grid.Column="0" Text="延迟：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="5" Grid.Column="1" Text="@(_server?.Ping ?? "")" FontSize="12"
+						           Foreground="@("#DCE6EF")" />
+					</Grid>
+
+					<Grid ColumnDefinitions="@("88,*")" RowDefinitions="@("Auto,Auto")" RowSpacing="4">
+						<TextBlock Grid.Row="0" Grid.Column="0" Text="Valve 反作弊：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="0" Grid.Column="1" Text="@(_server?.Item.Secure == true ? "安全" : "不安全")"
+						           FontSize="12" Foreground="@(_server?.Item.Secure == true ? "#7FD68A" : "#D8C97A")" />
+						<TextBlock Grid.Row="1" Grid.Column="0" Text="版本：" FontSize="12" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Row="1" Grid.Column="1" Text="@((_server?.Item.ServerVersion ?? 0).ToString())"
+						           FontSize="12" Foreground="@("#DCE6EF")" />
+					</Grid>
+
+					@* 自动重试（DialogGameInfo_AutoRetry.res）：AutoRetry 开关 + 两个单选模式 *@
+					<StackPanel Orientation="Orientation.Horizontal" Spacing="8">
+						<CheckBox @bind-IsChecked="_autoRetry">自动重试</CheckBox>
+						<TextBlock Text="（当此服务器有空余的玩家位置的时候）" FontSize="11" Foreground="@("#7E8C9B")"
+						           VerticalAlignment="VerticalAlignment.Center" />
+					</StackPanel>
+					<StackPanel Spacing="2" Margin="@("4,0,0,0")">
+						<RadioButton GroupName="retry" IsChecked="@(_retryModeIndex == 0)" IsEnabled="@(_autoRetry == true)"
+						             OnClick="@(() => SetRetryMode(0))">服务器有可用的玩家位置的时候进入服务器。</RadioButton>
+						<RadioButton GroupName="retry" IsChecked="@(_retryModeIndex == 1)" IsEnabled="@(_autoRetry == true)"
+						             OnClick="@(() => SetRetryMode(1))">当服务器有可用的玩家位置的时候提醒我。</RadioButton>
+					</StackPanel>
+
+					@* 玩家列表（PlayerList）：玩家名字 / 比分 *@
+					<Grid ColumnDefinitions="@("260,120")" Margin="@("8,4,0,0")">
+						<TextBlock Grid.Column="0" Text="玩家名字" FontSize="11" Foreground="@("#8C9CAC")" />
+						<TextBlock Grid.Column="1" Text="比分" FontSize="11" Foreground="@("#8C9CAC")" />
+					</Grid>
+					<Border Background="@("#0F151B")" CornerRadius="6" BorderBrush="@("#2A3644")" BorderThickness="1"
+					        Height="140">
+						<Panel>
+							<ListBox T="PlayerRow" Classes="serverlist" ItemsSource="@_playerRows" Height="140">
+								<ItemTemplate>
+									<Grid ColumnDefinitions="@("260,120")" Margin="@("8,0")">
+										<TextBlock Grid.Column="0" Text="@context.Name" FontSize="12"
+										           Foreground="@("#DCE6EF")" VerticalAlignment="VerticalAlignment.Center"
+										           TextTrimming="TextTrimming.CharacterEllipsis" />
+										<TextBlock Grid.Column="1" Text="@context.Score" FontSize="12" Foreground="@("#A9B7C6")"
+										           VerticalAlignment="VerticalAlignment.Center" />
+									</Grid>
+								</ItemTemplate>
+							</ListBox>
+							@if (_playerRows.Count == 0)
+							{
+								<TextBlock Text="此服务器当前没有玩家。" Margin="@("10,8")" FontSize="11" Foreground="@("#7E8C9B")"
+								           IsHitTestVisible="false" VerticalAlignment="VerticalAlignment.Top" />
+							}
+						</Panel>
+					</Border>
+
+					@if (_showRules)
+					{
+						<TextBlock Text="服务器规则" FontSize="11" Foreground="@("#8C9CAC")" />
+						<Border Background="@("#0F151B")" CornerRadius="6" BorderBrush="@("#2A3644")" BorderThickness="1"
+						        Height="110">
+							<ScrollViewer>
+								<StackPanel Spacing="1" Margin="@("8,4")">
+									@if (_ruleLines.Count == 0)
+									{
+										<TextBlock Text="正在读取服务器规则..." FontSize="11" Foreground="@("#7E8C9B")" />
+									}
+									@foreach (var line in _ruleLines)
+									{
+										<TextBlock Text="@line" FontSize="11" Foreground="@("#8C9CAC")" />
+									}
+								</StackPanel>
+							</ScrollViewer>
+						</Border>
+					}
+
+					<StackPanel Orientation="Orientation.Horizontal" Spacing="8"
+					            HorizontalAlignment="HorizontalAlignment.Right">
+						<Button OnClick="@(() => EnterFromInfo())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#4FA3E3")" Foreground="@("#0B1016")">进入</Button>
+						<Button OnClick="@(() => RefreshSelectedServer())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#263140")" Foreground="@("#DCE6EF")">刷新</Button>
+						<Button OnClick="@(() => ToggleRules())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#263140")" Foreground="@("#DCE6EF")">@(_showRules ? "隐藏规则" : "规则")</Button>
+						<Button OnClick="@(() => CloseServerInfo())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#263140")" Foreground="@("#DCE6EF")">关闭</Button>
+					</StackPanel>
+				</StackPanel>
+			</Border>
+		</Border>
+
+		@* —— 服务器密码模态（原版 CDialogServerPassword：Servers/DialogServerPassword.res）—— *@
+		<Border Background="@("#B4000000")" IsVisible="@_passwordPromptOpen">
+			<Border Background="@("#161D26")" BorderBrush="@("#2A3644")" BorderThickness="1" CornerRadius="8"
+			        Width="380" Padding="@("18,14")" HorizontalAlignment="HorizontalAlignment.Center"
+			        VerticalAlignment="VerticalAlignment.Center">
+				<StackPanel Spacing="10">
+					<TextBlock Text="服务器需要密码才能进入" FontSize="14" Foreground="@("#E9EFF5")" />
+					<TextBlock Text="这个服务器需要密码才能进入" FontSize="12" Foreground="@("#D8C97A")" />
+					<StackPanel Orientation="Orientation.Horizontal" Spacing="8">
+						<TextBlock Text="密码" Width="56" FontSize="12" Foreground="@("#A9B7C6")"
+						           VerticalAlignment="VerticalAlignment.Center" />
+						<TextBox @bind-Text="_password" Width="240" />
+					</StackPanel>
+					<StackPanel Orientation="Orientation.Horizontal" Spacing="8"
+					            HorizontalAlignment="HorizontalAlignment.Right">
+						<Button OnClick="@(() => ConfirmPasswordAndConnect())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#4FA3E3")" Foreground="@("#0B1016")">连接</Button>
+						<Button OnClick="@(() => CancelPasswordPrompt())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#263140")" Foreground="@("#DCE6EF")">取消</Button>
+					</StackPanel>
+				</StackPanel>
+			</Border>
+		</Border>
+
+		@* —— 添加服务器模态（原版 CDialogAddServer：Servers/DialogAddServer.res）—— *@
+		<Border Background="@("#B4000000")" IsVisible="@_addServerOpen">
+			<Border Background="@("#161D26")" BorderBrush="@("#2A3644")" BorderThickness="1" CornerRadius="8"
+			        Width="460" Padding="@("18,14")" HorizontalAlignment="HorizontalAlignment.Center"
+			        VerticalAlignment="VerticalAlignment.Center">
+				<StackPanel Spacing="10">
+					<TextBlock Text="@(_addServerErrorTitle ?? "添加服务器 - 服务器")" FontSize="14" Foreground="@("#E9EFF5")" />
+					<TextBlock Text="通过输入IP地址添加服务器。" FontSize="12" Foreground="@("#A9B7C6")" />
+					<StackPanel Orientation="Orientation.Horizontal" Spacing="8">
+						<TextBlock Text="IP地址：" Width="64" FontSize="12" Foreground="@("#A9B7C6")"
+						           VerticalAlignment="VerticalAlignment.Center" />
+						<TextBox @bind-Text="_addAddress" Width="280" />
+					</StackPanel>
+					<TextBlock Text="示例：tfc.valvesoftware.com，counterstrike.speakeasy.net:27016，205.158.143.200:27015"
+					           FontSize="11" Foreground="@("#7E8C9B")" TextWrapping="TextWrapping.Wrap" />
+					@if (_addServerError != null)
+					{
+						<TextBlock Text="@_addServerError" FontSize="11" Foreground="@("#E8746E")" />
+					}
+					<StackPanel Orientation="Orientation.Horizontal" Spacing="8"
+					            HorizontalAlignment="HorizontalAlignment.Right">
+						<Button OnClick="@(() => ConfirmAddServer())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#4FA3E3")" Foreground="@("#0B1016")">确认</Button>
+						<Button OnClick="@(() => CloseAddServer())" Width="80" Height="28" CornerRadius="6"
+						        Background="@("#263140")" Foreground="@("#DCE6EF")">取消</Button>
+					</StackPanel>
+				</StackPanel>
+			</Border>
+		</Border>
+	</Panel>
+</Border>
+
+@code {
+	enum BrowserTab { Internet, Favorites, History, Spectate, Lan, Friends }
+
+	// 列头排序（原版 ListPanel 的 SetSortFunc）
+	enum SortColumn { Name, Game, Players, Map, LastPlayed, Ping }
+
+	static readonly BrowserTab[] s_tabs =
+		[BrowserTab.Internet, BrowserTab.Favorites, BrowserTab.History, BrowserTab.Spectate, BrowserTab.Lan, BrowserTab.Friends];
+
+	// 过滤器文案与取值取自 serverbrowser_schinese.txt / Regions.vdf
+	static readonly string[] s_gameOptions = ["<所有>", "Counter-Strike"];
+	static readonly string[] s_pingOptions = ["<所有>", "< 50", "< 100", "< 150", "< 250", "< 350", "< 600"];
+	static readonly int[] s_pingLimits = [0, 50, 100, 150, 250, 350, 600];
+	static readonly string[] s_secureOptions = ["<所有>", "安全", "不安全"];
+
+	// 区域过滤：platform/servers/Regions.vdf 的 code（255 = 全部，不传过滤器）
+	static readonly string[] s_regions = ["世界", "美国 - 东部", "美国 - 西部", "南美", "欧洲", "亚洲", "澳大利亚", "中东", "非洲"];
+	static readonly string[] s_regionCodes = ["255", "0", "1", "2", "3", "4", "5", "6", "7"];
+
+	// 列表行:显示属性在构造/更新时预算好,并实现 INotifyPropertyChanged——
+	// 行模板是原生 FuncDataTemplate + 数据绑定,快速刷新原地更新同一实例时可视行即时重绘
+	sealed class ServerRow : System.ComponentModel.INotifyPropertyChanged
+	{
+		static readonly System.ComponentModel.PropertyChangedEventArgs
+			s_nameArgs = new(nameof(Name)), s_nameColorArgs = new(nameof(NameColor)),
+			s_gameArgs = new(nameof(Game)), s_playersTextArgs = new(nameof(PlayersText)),
+			s_mapArgs = new(nameof(Map)), s_lastPlayedArgs = new(nameof(LastPlayed)),
+			s_pingArgs = new(nameof(Ping)), s_pingColorArgs = new(nameof(PingColor)),
+			s_flagsArgs = new(nameof(Flags));
+
+		static readonly Avalonia.Media.IBrush
+			s_brightText = Avalonia.Media.Brush.Parse("#DCE6EF"),
+			s_dimText = Avalonia.Media.Brush.Parse("#6F7E8D"),
+			s_green = Avalonia.Media.Brush.Parse("#7FD68A"),
+			s_yellow = Avalonia.Media.Brush.Parse("#D8C97A"),
+			s_red = Avalonia.Media.Brush.Parse("#E8746E");
+
+		public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+		public GameServerItem Item { get; private set; }
+
+		/// <summary>在 HServerListRequest 里的下标（RefreshServer / GetServerDetails 用）</summary>
+		public int Index { get; set; }
+
+		string _name = "";
+		public string Name { get => _name; private set => Set(ref _name, value, s_nameArgs); }
+
+		Avalonia.Media.IBrush _nameColor = s_dimText;
+		public Avalonia.Media.IBrush NameColor { get => _nameColor; private set => Set(ref _nameColor, value, s_nameColorArgs); }
+
+		string _game = "";
+		public string Game { get => _game; private set => Set(ref _game, value, s_gameArgs); }
+
+		string _playersText = "";
+		public string PlayersText { get => _playersText; private set => Set(ref _playersText, value, s_playersTextArgs); }
+
+		string _map = "";
+		public string Map { get => _map; private set => Set(ref _map, value, s_mapArgs); }
+
+		string _lastPlayed = "";
+		public string LastPlayed { get => _lastPlayed; private set => Set(ref _lastPlayed, value, s_lastPlayedArgs); }
+
+		string _ping = "";
+		public string Ping { get => _ping; private set => Set(ref _ping, value, s_pingArgs); }
+
+		Avalonia.Media.IBrush _pingColor = s_dimText;
+		public Avalonia.Media.IBrush PingColor { get => _pingColor; private set => Set(ref _pingColor, value, s_pingColorArgs); }
+
+		string _flags = "";
+		public string Flags { get => _flags; private set => Set(ref _flags, value, s_flagsArgs); }
+
+		public ServerRow(GameServerItem item, int index)
+		{
+			Item = item;
+			Index = index;
+			Refresh(item);
+		}
+
+		/// <summary>原地换数据（同一实例，选中态/信息浮层引用都不动，可视行经绑定即时重绘）</summary>
+		public void Refresh(GameServerItem item)
+		{
+			Item = item;
+			Name = item.ServerName;
+			NameColor = item.HadSuccessfulResponse ? s_brightText : s_dimText;
+			Game = string.IsNullOrEmpty(item.GameDescription) ? item.GameDir : item.GameDescription;
+			PlayersText = item.PlayersText;
+			Map = item.Map;
+
+			// 原版历史记录列“最后运行日期”
+			LastPlayed = item.TimeLastPlayed == 0
+				? ""
+				: DateTimeOffset.FromUnixTimeSeconds(item.TimeLastPlayed).LocalDateTime.ToString("yyyy-MM-dd HH:mm");
+
+			// 原版 ServerBrowser_PendingPing "<暂挂>" / ServerBrowser_NotResponding "<没有响应>"
+			Ping = item.HadSuccessfulResponse ? item.Ping.ToString() : "<暂挂>";
+			PingColor = !item.HadSuccessfulResponse ? s_dimText
+				: item.Ping < 100 ? s_green : item.Ping < 200 ? s_yellow : s_red;
+
+			var f = "";
+			if (item.Password) f += "密码 ";
+			if (item.BotPlayers > 0) f += "机器人 ";
+			if (item.Secure) f += "VAC";
+			Flags = f.Trim();
+		}
+
+		void Set<T>(ref T field, T value, System.ComponentModel.PropertyChangedEventArgs args)
+		{
+			if (System.Collections.Generic.EqualityComparer<T>.Default.Equals(field, value))
+				return;
+			field = value;
+			PropertyChanged?.Invoke(this, args);
+		}
+	}
+
+	sealed class PlayerRow(string name, int score)
+	{
+		public string Name { get; } = name;
+		public string Score { get; } = score.ToString();
+	}
+
+	// 右键菜单项（原版列表右键：连接服务器 / 查看服务器信息 / 刷新服务器 / 收藏 / 删除）
+	sealed class MenuAction(string header, Action run, bool enabled = true)
+	{
+		public string Header { get; } = header;
+		public Action Run { get; } = run;
+		public bool Enabled { get; } = enabled;
+	}
+
+	BrowserTab _tab = BrowserTab.Internet;
+	// 全量结果（已过滤+排序）与显示窗口分离。列表是原生 ListBox（ServerListView 桥），
+	// 行控件完全不经过 Blazor；窗口的意义是控制单次排序/过滤重建与"显示更多"的粒度。
+	readonly List<ServerRow> _all = [];
+	readonly ObservableCollection<ServerRow> _rows = [];
+	readonly Dictionary<string, ServerRow> _byAddress = [];
+	int _windowSize = WindowSize;
+	readonly List<MenuAction> _menuActions = [];
+	ServerListView? _listView;
+	ServerRow? _selected;
+	ServerQuery? _query;
+	bool _refreshing;
+	string _status = "";
+	string _emptyText = "";
+	DispatcherTimer? _flushTimer;
+	DispatcherTimer? _retryTimer;
+	readonly List<(int Index, GameServerItem Item)> _pending = [];
+	bool _suppressSelection;
+
+	// 密码对话框（DialogServerPassword.res）
+	bool _passwordPromptOpen;
+	string _password = "";
+	string? _pendingConnectAddress;
+
+	// 服务器信息模态（DialogGameInfo）/ 添加服务器（DialogAddServer）
+	bool _infoOpen;
+	bool _addServerOpen;
+	string? _addServerError;
+	ServerRow? _server;
+
+	// 自动重试：AutoRetry 开关 + 两个模式（AutoRetryJoin / AutoRetryAlert）
+	bool? _autoRetry;
+	int _retryModeIndex;
+	string? _autoRetryAddress;
+
+	// 玩家列表（DialogGameInfo 的 PlayerList：玩家名字 / 比分）
+	PlayersQuery? _players;
+	readonly ObservableCollection<PlayerRow> _playerRows = [];
+
+	// 服务器规则
+	RulesQuery? _rulesQuery;
+	bool _showRules;
+	readonly List<string> _ruleLines = [];
+
+	// 过滤器状态（InternetGamesPage_Filters.res）
+	bool _filtersOpen;
+	int _gameFilterIndex;
+	int _pingFilterIndex;
+	int _secureFilterIndex;
+	int _regionIndex;
+	bool? _filterNotFull;
+	bool? _filterNotEmpty;
+	bool? _filterNoPassword;
+	string _mapFilter = "";
+	string _addAddress = "";
+	string? _addServerErrorTitle;
+
+	// Steam 收藏接口不可用时的兜底（只活在本次运行内）
+	readonly List<string> _localFavorites = [];
+
+	// 全量结果上限（原版不设上限，这里给一个安全值）
+	const int MaxRows = 2000;
+
+	// 显示窗口大小：ListBox 只绑前 N 条，"显示更多"按需扩
+	const int WindowSize = 300;
+
+	// 列宽：按比例分配（历史记录页多一列“最后运行日期”），表头与行模板共用同一份定义。
+	// 原来用固定像素（320,120,70,140,60,110 = 820），游戏内面板宽度小于这个总和时
+	// 右边的列会被挤出可视区（延迟/标记看不到），所以改成星号比例，随窗口自适应。
+	string ColumnDefs => _tab == BrowserTab.History
+		? "2.5*,1.05*,0.55*,1.15*,0.95*,0.45*,0.8*"
+		: "2.8*,1.2*,0.6*,1.4*,0.5*,0.8*";
+
+	int PingColumnIndex => _tab == BrowserTab.History ? 5 : 4;
+
+	protected override void OnInitialized()
+	{
+		// 500ms 批量落一次：每次 Flush 都会触发一次整页渲染（Blazonia 行宿主的缺陷
+		// 决定了渲染成本 ∝ 已实现行数），200ms 在 1600+ 行时明显卡顿
+		_flushTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(500), DispatcherPriority.Background, (_, _) => Flush());
+		_flushTimer.Start();
+		if (!SteamServers.Available)
+		{
+			_status = "无法获取主服务器地址。服务浏览器无法运行。";
+			_emptyText = "Steam 未就绪（需通过 Steam 启动游戏）。";
+			return;
+		}
+		Refresh();
+	}
+
+	public void Dispose()
+	{
+		_flushTimer?.Stop();
+		_retryTimer?.Stop();
+		StopAutoRetry();
+		_query?.Dispose();
+		_players?.Dispose();
+		_rulesQuery?.Dispose();
+	}
+
+	// —— 原生列表接线（ServerListView 桥）——
+
+	bool _wired;
+
+	/// <summary>把原生 ListBox 和数据/事件接上。懒触发(首次 Flush/渲染时),不依赖 OnAfterRender 时序。
+	/// ItemsSource 必须在这里显式挂——旧 razor 版由 Blazonia 代挂,改原生后断了这一根线。</summary>
+	void EnsureWired()
+	{
+		if (_wired || _listView == null)
+			return;
+		_wired = true;
+		var list = _listView.List;
+		list.ItemsSource = _rows;
+		list.ItemTemplate = BuildRowTemplate();
+		list.SelectionChanged += (_, e) => OnRowSelectionChanged(e);
+		list.DoubleTapped += OnRowDoubleTappedNative;
+		list.PointerPressed += OnListPointerPressed;
+		RebuildMenu();
+	}
+
+	protected override void OnAfterRender(bool firstRender) => EnsureWired();
+
+	/// <summary>原生行模板:纯 FuncDataTemplate + 数据绑定,VirtualizingStackPanel 只实例化可视区。
+	/// 列宽与表头共用 ColumnDefs;行高/悬停/选中样式复用 MainMenuWindow.axaml 的 ListBox.serverlist。</summary>
+	IDataTemplate BuildRowTemplate()
+	{
+		return new FuncDataTemplate<ServerRow>((_, _) => BuildRowGrid(), supportsRecycling: false);
+	}
+
+	Avalonia.Controls.Grid BuildRowGrid()
+	{
+		var grid = new Avalonia.Controls.Grid { Margin = new Avalonia.Thickness(8, 0) };
+		foreach (var def in Avalonia.Controls.ColumnDefinitions.Parse(ColumnDefs))
+			grid.ColumnDefinitions.Add(new Avalonia.Controls.ColumnDefinition(def.Width));
+		var col = 0;
+		AddTextCell(grid, col++, nameof(ServerRow.Name), null);
+		AddTextCell(grid, col++, nameof(ServerRow.Game), "#A9B7C6");
+		AddTextCell(grid, col++, nameof(ServerRow.PlayersText), "#A9B7C6");
+		AddTextCell(grid, col++, nameof(ServerRow.Map), "#A9B7C6");
+		if (_tab == BrowserTab.History)
+			AddTextCell(grid, col++, nameof(ServerRow.LastPlayed), "#A9B7C6");
+		AddTextCell(grid, col++, nameof(ServerRow.Ping), null);
+		AddTextCell(grid, col, nameof(ServerRow.Flags), "#8C9CAC", 11);
+		return grid;
+	}
+
+	/// <summary>列单元格:文字必绑,colorPath 为空则固定色,否则绑定行上的颜色属性</summary>
+	static void AddTextCell(Avalonia.Controls.Grid grid, int col, string path, string? color, double fontSize = 12)
+	{
+		var text = new Avalonia.Controls.TextBlock
+		{
+			FontSize = fontSize,
+			VerticalAlignment = Avalonia.Layout.VerticalAlignment.Center,
+			TextTrimming = Avalonia.Media.TextTrimming.CharacterEllipsis,
+		};
+		if (color != null)
+			text.Foreground = Avalonia.Media.Brush.Parse(color);
+		text.Bind(Avalonia.Controls.TextBlock.TextProperty, new Binding(path));
+		if (color == null)
+			text.Bind(Avalonia.Controls.TextBlock.ForegroundProperty, new Binding(path + "Color"));
+		grid.Children.Add(text);
+		Avalonia.Controls.Grid.SetColumn(text, col);
+	}
+
+	void OnRowDoubleTappedNative(object? sender, object e) => OnRowDoubleTapped();
+
+	/// <summary>右键按下时选中指针下的行（原版列表行为:右键选中后才弹菜单）</summary>
+	void OnListPointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs e)
+	{
+		var list = _listView?.List;
+		if (list == null || !e.GetCurrentPoint(list).Properties.IsRightButtonPressed)
+			return;
+		if (e.Source is not Avalonia.Visual source)
+			return;
+		var container = source.GetSelfAndVisualAncestors()
+			.OfType<Avalonia.Controls.ListBoxItem>().FirstOrDefault();
+		if (container?.DataContext is not ServerRow row || ReferenceEquals(_selected, row))
+			return;
+		_suppressSelection = true;
+		list.SelectedItem = row;
+		_suppressSelection = false;
+		_selected = row;
+		RebuildMenu();
+		StateHasChanged();
+	}
+
+	static string TabLabel(BrowserTab tab) => tab switch
+	{
+		BrowserTab.Internet => "互联网",
+		BrowserTab.Favorites => "我喜爱的",
+		BrowserTab.History => "历史记录",
+		BrowserTab.Spectate => "观看",
+		BrowserTab.Lan => "局域网",
+		_ => "朋友"
+	};
+
+	void OnTabClick(BrowserTab tab)
+	{
+		if (_tab == tab)
+			return;
+		_tab = tab;
+		Refresh();
+	}
+
+	void ToggleFilters()
+	{
+		_filtersOpen = !_filtersOpen;
+		// 收起过滤器时立即按新条件重筛（原版改完过滤器点刷新才生效，这里对齐"关面板即应用"）
+		if (!_filtersOpen)
+			ApplyFilterChange();
+		StateHasChanged();
+	}
+
+	// —— 查询 ——
+
+	void Refresh()
+	{
+		_query?.Dispose();
+		_query = null;
+		_all.Clear();
+		_windowSize = WindowSize;
+		_rows.Clear();
+		_byAddress.Clear();
+		// 列布局随页签变(History 多一列),行模板跟着重建
+		if (_listView != null)
+			_listView.List.ItemTemplate = BuildRowTemplate();
+		_pending.Clear();
+		_selected = null;
+		_refreshing = false;
+		_infoOpen = false;
+		_showRules = false;
+		_passwordPromptOpen = false;
+		_pendingConnectAddress = null;
+		RebuildMenu();
+
+		if (!SteamServers.Available)
+		{
+			_status = "无法获取主服务器地址。服务浏览器无法运行。";
+			_emptyText = "Steam 未就绪（需通过 Steam 启动游戏）。";
+			StateHasChanged();
+			return;
+		}
+
+		_query = _tab switch
+		{
+			// 区域在 Steam 端过滤（原版 InternetGamesPage 也是把 region 塞进过滤器请求）
+			BrowserTab.Internet => SteamServers.RequestInternet(
+				_regionIndex > 0 ? "region" : null,
+				s_regionCodes[Math.Clamp(_regionIndex, 0, s_regionCodes.Length - 1)]),
+			BrowserTab.Favorites => SteamServers.RequestFavorites(),
+			BrowserTab.History => SteamServers.RequestHistory(),
+			BrowserTab.Spectate => SteamServers.RequestSpectator(),
+			BrowserTab.Lan => SteamServers.RequestLan(),
+			BrowserTab.Friends => SteamServers.RequestFriends(),
+			_ => null
+		};
+
+		if (_query == null)
+		{
+			_status = _tab == BrowserTab.Friends
+				? "目前你的朋友中没有人在进行游戏。"
+				: "无法获取主服务器地址。服务浏览器无法运行。";
+			_emptyText = "";
+			StateHasChanged();
+			return;
+		}
+
+		_refreshing = true;
+		_status = "刷新服务器列表...";
+		_emptyText = "";
+		_query.ServerResponded += OnServerResponded;
+		_query.Completed += OnQueryCompleted;
+		StateHasChanged();
+	}
+
+	// Steam 回调线程：这里立刻取详情（GetServerDetails 只在回调内有效），排队等 UI 线程刷新
+	void OnServerResponded(int index)
+	{
+		var query = _query;
+		var item = query?.GetServer(index);
+		if (item == null)
+			return;
+
+		// 自动重试：这个服务器出现空位就直接进
+		var retry = _autoRetryAddress;
+		if (retry != null
+			&& string.Equals(item.Address, retry, StringComparison.OrdinalIgnoreCase)
+			&& item.MaxPlayers > 0
+			&& item.Players < item.MaxPlayers)
+		{
+			Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+			{
+				if (!string.Equals(_autoRetryAddress, retry, StringComparison.OrdinalIgnoreCase))
+					return;
+				StopAutoRetry();
+				if (_retryModeIndex == 0)
+				{
+					_status = "服务器有空位，正在进入...";
+					ConnectAddress(retry);
+				}
+				else
+				{
+					_status = "服务器有空位可以进入了。";
+					StateHasChanged();
+				}
+			});
+			return;
+		}
+
+		lock (_pending)
+			_pending.Add((index, item));
+	}
+
+	void OnQueryCompleted()
+	{
+		Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+		{
+			Flush();
+			_refreshing = false;
+			UpdateStatus();
+			StateHasChanged();
+		});
+	}
+
+	void Flush()
+	{
+		EnsureWired();
+		bool changed = false;
+		lock (_pending)
+		{
+			foreach (var (index, item) in _pending)
+			{
+				if (!PassesFilter(item))
+					continue;
+				if (_byAddress.TryGetValue(item.Address, out var exists))
+				{
+					// 快速刷新 / 单服刷新：原地更新同一行实例（选中态/信息浮层引用都不动），
+					// 可视行经行模板的数据绑定即时重绘，不碰集合
+					exists.Refresh(item);
+					exists.Index = index;
+					changed = true;
+					continue;
+				}
+				if (_all.Count >= MaxRows)
+					continue;
+				var row = new ServerRow(item, index);
+				_byAddress[item.Address] = row;
+				var pos = InsertSorted(row);
+				// 落进显示窗口才进 UI 集合（原生增量插入）；窗口外的等"显示更多"
+				if (pos < _windowSize)
+				{
+					_rows.Insert(pos, row);
+					if (_rows.Count > _windowSize)
+						_rows.RemoveAt(_rows.Count - 1);
+				}
+				changed = true;
+			}
+			_pending.Clear();
+		}
+		if (changed)
+		{
+			UpdateStatus();
+			StateHasChanged();
+		}
+	}
+
+	/// <summary>按当前排序列二分插入到全量列表，返回落点下标（显示窗口的同步由 RebuildWindow 做）</summary>
+	int InsertSorted(ServerRow row)
+	{
+		var lo = 0;
+		var hi = _all.Count;
+		while (lo < hi)
+		{
+			var mid = (lo + hi) / 2;
+			if (CompareRows(_all[mid], row) <= 0)
+				lo = mid + 1;
+			else
+				hi = mid;
+		}
+		_all.Insert(lo, row);
+		return lo;
+	}
+
+	/// <summary>把 _all 的前 _windowSize 条同步到 _rows（一次集合 Reset；行实例保持不变，
+	/// 选中态由 ListBox 按引用恢复）。只在窗口内容实际变化时调用</summary>
+	void RebuildWindow()
+	{
+		_suppressSelection = true;
+		_rows.Clear();
+		var n = Math.Min(_windowSize, _all.Count);
+		for (var i = 0; i < n; i++)
+			_rows.Add(_all[i]);
+		_suppressSelection = false;
+	}
+
+	/// <summary>"显示更多"：窗口再扩一批（增量 Add，不 Reset）</summary>
+	void ShowMore()
+	{
+		var n = Math.Min(_all.Count, _windowSize + WindowSize);
+		for (var i = _windowSize; i < n; i++)
+			_rows.Add(_all[i]);
+		_windowSize = Math.Max(_windowSize, n);
+		StateHasChanged();
+	}
+
+	bool PassesFilter(GameServerItem item)
+	{
+		var limit = s_pingLimits[Math.Clamp(_pingFilterIndex, 0, s_pingLimits.Length - 1)];
+		if (limit > 0 && (!item.HadSuccessfulResponse || item.Ping > limit))
+			return false;
+		if (_filterNotFull == true && item.MaxPlayers > 0 && item.Players >= item.MaxPlayers)
+			return false;
+		if (_filterNotEmpty == true && item.Players <= 0)
+			return false;
+		if (_filterNoPassword == true && item.Password)
+			return false;
+		if (_secureFilterIndex == 1 && !item.Secure)
+			return false;
+		if (_secureFilterIndex == 2 && item.Secure)
+			return false;
+		if (_gameFilterIndex == 1 && !string.Equals(item.GameDir, "cstrike", StringComparison.OrdinalIgnoreCase))
+			return false;
+		if (!string.IsNullOrEmpty(_mapFilter) && !item.Map.Contains(_mapFilter.Trim(), StringComparison.OrdinalIgnoreCase))
+			return false;
+		return true;
+	}
+
+	// 状态栏文案对齐 serverbrowser_schinese.txt（ServerBrowser_ServersCount = "服务器 (%s1)"）
+	void UpdateStatus()
+	{
+		if (_refreshing)
+			_status = $"刷新服务器列表... 服务器 ({_all.Count})";
+		else if (_all.Count == 0)
+			_status = _tab switch
+			{
+				BrowserTab.Lan => "在本地网络上没有运行任何服务器。",
+				BrowserTab.Favorites => "你目前没有选择任何喜爱的服务器。",
+				BrowserTab.History => "最近没有运行任何服务器。",
+				BrowserTab.Friends => "目前你的朋友中没有人在进行游戏。",
+				_ => "没有因特网游戏响应"
+			};
+		else
+			_status = $"服务器 ({_all.Count})";
+
+		_emptyText = _all.Count == 0 ? _status : "";
+	}
+
+	void OnRefreshButton()
+	{
+		if (_refreshing)
+			StopRefresh();
+		else
+			Refresh();
+	}
+
+	/// <summary>停止刷新 = ISteamMatchmakingServers::CancelQuery，保留已收到的结果</summary>
+	void StopRefresh()
+	{
+		_query?.Cancel();
+		_refreshing = false;
+		Flush();
+		UpdateStatus();
+		StateHasChanged();
+	}
+
+	/// <summary>快速刷新 = RefreshQuery：只重新 ping 已有列表，不重新请求主服务器</summary>
+	void QuickRefresh()
+	{
+		if (_query == null)
+		{
+			Refresh();
+			return;
+		}
+		_refreshing = true;
+		_status = "刷新服务器列表...";
+		_query.Refresh();
+		StateHasChanged();
+	}
+
+	// —— 排序 ——
+
+	SortColumn _sortColumn = SortColumn.Players;
+	bool _sortAscending;
+
+	void SortBy(SortColumn column)
+	{
+		if (_sortColumn == column)
+			_sortAscending = !_sortAscending;
+		else
+		{
+			_sortColumn = column;
+			_sortAscending = true;
+		}
+		ApplySort();
+		StateHasChanged();
+	}
+
+	/// <summary>排序比较（_sortAscending 决定升降序）</summary>
+	int CompareRows(ServerRow a, ServerRow b)
+	{
+		var c = _sortColumn switch
+		{
+			SortColumn.Name => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase),
+			SortColumn.Game => string.Compare(a.Game, b.Game, StringComparison.OrdinalIgnoreCase),
+			SortColumn.Map => string.Compare(a.Map, b.Map, StringComparison.OrdinalIgnoreCase),
+			SortColumn.LastPlayed => a.Item.TimeLastPlayed.CompareTo(b.Item.TimeLastPlayed),
+			SortColumn.Ping => a.Item.Ping.CompareTo(b.Item.Ping),
+			_ => a.Item.Players.CompareTo(b.Item.Players)
+		};
+		return _sortAscending ? c : -c;
+	}
+
+	void ApplySort()
+	{
+		_all.Sort(CompareRows);
+		RebuildWindow();
+		// 行实例全程保持，选中项引用仍然有效
+	}
+
+	string SortColor(SortColumn column) =>
+		_sortColumn == column ? "#DCE6EF" : "#8C9CAC";
+
+	string SortLabel(string text, SortColumn column) =>
+		_sortColumn == column ? $"{text} {(_sortAscending ? "▲" : "▼")}" : text;
+
+	// —— 交互 ——
+
+	void OnRowSelectionChanged(Avalonia.Controls.SelectionChangedEventArgs e)
+	{
+		if (_suppressSelection)
+			return;
+		_selected = e.AddedItems.Count > 0 ? e.AddedItems[0] as ServerRow : null;
+		RebuildMenu();
+		// 原版只在打开服务器信息（DialogGameInfo）时才拉玩家列表
+		if (_selected != null && _infoOpen)
+			LoadPlayers(_selected.Item);
+		StateHasChanged();
+	}
+
+	/// <summary>双击列表项 = 原版 ListPanel 的双击直接连接</summary>
+	void OnRowDoubleTapped()
+	{
+		if (_selected != null)
+			ConnectSelected();
+	}
+
+	/// <summary>拉玩家列表：DialogGameInfo 的 PlayerList（PlayersServer + AddPlayerToList）</summary>
+	void LoadPlayers(GameServerItem item)
+	{
+		_players?.Dispose();
+		_players = null;
+		_playerRows.Clear();
+
+		var query = SteamServers.RequestPlayers(item.Ip, item.ConnectionPort);
+		if (query == null)
+			return;
+		_players = query;
+		query.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+		{
+			if (!ReferenceEquals(_players, query))
+				return;
+			_playerRows.Clear();
+			foreach (var (name, score) in query.Players.Take(64))
+				_playerRows.Add(new PlayerRow(name, score));
+			StateHasChanged();
+		});
+	}
+
+	void ConnectSelected()
+	{
+		if (_selected == null)
+			return;
+		var item = _selected.Item;
+		if (item.Password)
+		{
+			// 原版 DialogServerPassword：单独的密码模态
+			_passwordPromptOpen = true;
+			_pendingConnectAddress = item.Address;
+			_status = "服务器需要密码才能进入。";
+			StateHasChanged();
+			return;
+		}
+		ConnectAddress(item.Address);
+	}
+
+	void ConfirmPasswordAndConnect()
+	{
+		if (!string.IsNullOrEmpty(_password))
+			EngineCommands.SetCvar("password", _password);
+		var address = _pendingConnectAddress ?? _selected?.Item.Address;
+		_passwordPromptOpen = false;
+		_password = "";
+		_pendingConnectAddress = null;
+		if (address != null)
+			ConnectAddress(address);
+		StateHasChanged();
+	}
+
+	void CancelPasswordPrompt()
+	{
+		_passwordPromptOpen = false;
+		_password = "";
+		_pendingConnectAddress = null;
+		StateHasChanged();
+	}
+
+	/// <summary>原版连接链路：Q_snprintf("connect %s") → ClientCmd，同时写一条 Steam 历史记录</summary>
+	void ConnectAddress(string address)
+	{
+		var item = _selected?.Item;
+		if (item != null && SteamFavorites.TryParseAddress(item.Address, out var ip, out var port))
+			SteamFavorites.Add(ip, port, item.QueryPort == 0 ? port : item.QueryPort, SteamFavorites.FlagHistory);
+
+		// 满员：原版按 AutoRetry 的模式处理（JoinWhenSlotOpens / AlertMeWhenSlotOpens）
+		if (item != null && item.MaxPlayers > 0 && item.Players >= item.MaxPlayers)
+		{
+			if (_autoRetry != true)
+			{
+				_status = "无法连接 - 服务器已经人满。";
+				StateHasChanged();
+				return;
+			}
+			StartAutoRetry(item.Address);
+			_status = _retryModeIndex == 0
+				? "当此服务器有空余的玩家位置的时候，你将会自动进入。"
+				: "当此服务器有空余的玩家位置的时候，你将会被提醒。";
+			StateHasChanged();
+			return;
+		}
+
+		EngineCommands.ClientCmd($"connect {address}");
+		// VAC：原版会对安全服务器提示 VAC_ConnectingToSecureServer，这里给一条状态提示
+		if (item != null && item.Secure)
+			_status = "注意：此服务器受 VAC 保护。作弊将导致永久性禁止。";
+		else if (item != null)
+			_status = "此服务器未启用 VAC，连接不受保护。";
+		StateHasChanged();
+	}
+
+	void RefreshSelectedServer()
+	{
+		if (_selected == null || _query == null)
+			return;
+		SteamServers.RefreshServer(_query, _selected.Index);
+		_status = "刷新服务器...";
+		StateHasChanged();
+	}
+
+	/// <summary>添加当前服务器到收藏夹（原版 AddCurrentServer）</summary>
+	void AddSelectedToFavorites()
+	{
+		if (_selected == null)
+			return;
+		var item = _selected.Item;
+		if (!SteamFavorites.TryParseAddress(item.Address, out var ip, out var port))
+			return;
+		_status = SteamFavorites.Add(ip, port, item.QueryPort == 0 ? port : item.QueryPort, SteamFavorites.FlagFavorite)
+			? $"已添加至收藏夹：{item.Address}"
+			: "Steam 收藏不可用。";
+		StateHasChanged();
+	}
+
+	/// <summary>删除我喜爱的服务器列表中的服务器</summary>
+	void RemoveSelectedFromFavorites()
+	{
+		if (_selected == null)
+			return;
+		var item = _selected.Item;
+		if (!SteamFavorites.TryParseAddress(item.Address, out var ip, out var port))
+			return;
+		var removed = SteamFavorites.Remove(ip, port, item.QueryPort == 0 ? port : item.QueryPort, SteamFavorites.FlagFavorite);
+		_status = removed ? "已从收藏夹移除。" : "Steam 收藏不可用。";
+		if (removed)
+			Refresh();
+		StateHasChanged();
+	}
+
+	/// <summary>从历史记录删除服务器</summary>
+	void RemoveSelectedFromHistory()
+	{
+		if (_selected == null)
+			return;
+		var item = _selected.Item;
+		if (!SteamFavorites.TryParseAddress(item.Address, out var ip, out var port))
+			return;
+		var removed = SteamFavorites.Remove(ip, port, item.QueryPort == 0 ? port : item.QueryPort, SteamFavorites.FlagHistory);
+		_status = removed ? "已从历史记录移除。" : "Steam 收藏不可用。";
+		if (removed)
+			Refresh();
+		StateHasChanged();
+	}
+
+	void OnRegionChanged(Avalonia.Controls.SelectionChangedEventArgs e)
+	{
+		var s = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+		var i = s == null ? -1 : Array.IndexOf(s_regions, s);
+		if (i < 0 || i == _regionIndex)
+			return;
+		_regionIndex = i;
+		// 区域是服务端过滤，必须重新请求列表
+		Refresh();
+	}
+
+	void SetRetryMode(int index)
+	{
+		_retryModeIndex = index;
+		StateHasChanged();
+	}
+
+	void ToggleRules()
+	{
+		if (_showRules)
+		{
+			_showRules = false;
+			StateHasChanged();
+			return;
+		}
+		LoadRules();
+	}
+
+	/// <summary>服务器规则：ISteamMatchmakingServers::RulesServer</summary>
+	void LoadRules()
+	{
+		if (_selected == null)
+			return;
+		_rulesQuery?.Dispose();
+		_ruleLines.Clear();
+		_showRules = true;
+		_rulesQuery = SteamServers.RequestRules(_selected.Item.Ip, _selected.Item.ConnectionPort);
+		if (_rulesQuery == null)
+		{
+			_status = "Steam 接口不可用。";
+			StateHasChanged();
+			return;
+		}
+		var query = _rulesQuery;
+		query.Changed += () => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+		{
+			if (!ReferenceEquals(_rulesQuery, query))
+				return;
+			_ruleLines.Clear();
+			foreach (var (key, value) in query.Rules.Take(32))
+				_ruleLines.Add($"{key} = {value}");
+			if (query.Failed && _ruleLines.Count == 0)
+				_ruleLines.Add("服务器没有响应。");
+			StateHasChanged();
+		});
+		StateHasChanged();
+	}
+
+	// —— 自动重试轮询（每 5 秒刷一次该服务器，出现空位就进）——
+
+	void StartAutoRetry(string address)
+	{
+		_autoRetryAddress = address;
+		_retryTimer ??= new DispatcherTimer(TimeSpan.FromSeconds(5), DispatcherPriority.Background, (_, _) => RetryTick());
+		_retryTimer.Start();
+	}
+
+	void StopAutoRetry()
+	{
+		_autoRetryAddress = null;
+		_retryTimer?.Stop();
+	}
+
+	void RetryTick()
+	{
+		var address = _autoRetryAddress;
+		if (address == null || _query == null)
+		{
+			StopAutoRetry();
+			return;
+		}
+		if (!_byAddress.TryGetValue(address, out var row))
+		{
+			StopAutoRetry();
+			return;
+		}
+		SteamServers.RefreshServer(_query, row.Index);
+	}
+
+	void OpenServerInfo()
+	{
+		if (_selected == null)
+			return;
+		_server = _selected;
+		_infoOpen = true;
+		LoadPlayers(_selected.Item);
+		StateHasChanged();
+	}
+
+	void CloseServerInfo()
+	{
+		_infoOpen = false;
+		_showRules = false;
+		StateHasChanged();
+	}
+
+	void EnterFromInfo()
+	{
+		if (_passwordPromptOpen)
+			ConfirmPasswordAndConnect();
+		else
+			ConnectSelected();
+	}
+
+	void OpenAddServer()
+	{
+		_addAddress = "";
+		_addServerError = null;
+		_addServerErrorTitle = null;
+		_addServerOpen = true;
+		StateHasChanged();
+	}
+
+	void CloseAddServer()
+	{
+		_addServerOpen = false;
+		StateHasChanged();
+	}
+
+	/// <summary>添加服务器（Servers/DialogAddServer.res）：成功后写进 Steam 收藏</summary>
+	void ConfirmAddServer()
+	{
+		var addr = (_addAddress ?? "").Trim();
+		if (addr.Length > 0 && !addr.Contains(':'))
+			addr += ":27015";
+		if (!SteamFavorites.TryParseAddress(addr, out var ip, out var port))
+		{
+			_addServerErrorTitle = "添加服务器 - 错误";
+			_addServerError = "你所输入的服务器IP地址无效。";
+			StateHasChanged();
+			return;
+		}
+		var ok = SteamFavorites.Add(ip, port, port, SteamFavorites.FlagFavorite);
+		if (!ok && !_localFavorites.Contains(addr))
+			_localFavorites.Add(addr);
+		_addServerOpen = false;
+		_addAddress = "";
+		_status = ok ? $"已添加至收藏夹：{addr}" : "Steam 收藏不可用，已临时记录到本次运行。";
+		StateHasChanged();
+	}
+
+	void OnPingFilterChanged(Avalonia.Controls.SelectionChangedEventArgs e)
+	{
+		var s = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+		var i = s == null ? -1 : Array.IndexOf(s_pingOptions, s);
+		if (i >= 0)
+			_pingFilterIndex = i;
+		ApplyFilterChange();
+	}
+
+	void OnSecureFilterChanged(Avalonia.Controls.SelectionChangedEventArgs e)
+	{
+		var s = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+		var i = s == null ? -1 : Array.IndexOf(s_secureOptions, s);
+		if (i >= 0)
+			_secureFilterIndex = i;
+		ApplyFilterChange();
+	}
+
+	void OnGameFilterChanged(Avalonia.Controls.SelectionChangedEventArgs e)
+	{
+		var s = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+		var i = s == null ? -1 : Array.IndexOf(s_gameOptions, s);
+		if (i >= 0)
+			_gameFilterIndex = i;
+		ApplyFilterChange();
+	}
+
+	/// <summary>过滤器变更：原版会重新点一次刷新（GetNewList），这里对已收到的结果重筛</summary>
+	void ApplyFilterChange()
+	{
+		var kept = _all.Where(r => PassesFilter(r.Item)).ToList();
+		_all.Clear();
+		_all.AddRange(kept);
+		RebuildWindow();
+		if (_selected != null && !kept.Contains(_selected))
+			_selected = null;
+		UpdateStatus();
+		StateHasChanged();
+	}
+
+	// 原版 FilterString：列出当前生效的过滤器（FilterDescLatency / NotFull / NotEmpty / NoPassword / SecureOnly / InsecureOnly）
+	string _filterSummary
+	{
+		get
+		{
+			var parts = new List<string>();
+			var limit = s_pingLimits[Math.Clamp(_pingFilterIndex, 0, s_pingLimits.Length - 1)];
+			if (limit > 0)
+				parts.Add($"延迟 < {limit}");
+			if (_filterNotEmpty == true)
+				parts.Add("未空");
+			if (_filterNotFull == true)
+				parts.Add("未满");
+			if (_filterNoPassword == true)
+				parts.Add("没有密码");
+			if (_secureFilterIndex == 1)
+				parts.Add("安全");
+			else if (_secureFilterIndex == 2)
+				parts.Add("不安全");
+			if (!string.IsNullOrEmpty(_mapFilter))
+				parts.Add($"地图 {_mapFilter}");
+			return parts.Count == 0 ? "" : string.Join("、", parts);
+		}
+	}
+
+	// —— 右键菜单 ——
+
+	void RebuildMenu()
+	{
+		EnsureWired();
+		_menuActions.Clear();
+		var has = _selected != null;
+		_menuActions.Add(new MenuAction("连接服务器", ConnectSelected, has));
+		_menuActions.Add(new MenuAction("查看服务器信息", OpenServerInfo, has));
+		_menuActions.Add(new MenuAction("刷新服务器", RefreshSelectedServer, has && _query != null));
+		if (_tab != BrowserTab.Favorites)
+			_menuActions.Add(new MenuAction("添加服务器到收藏夹", AddSelectedToFavorites, has));
+		if (_tab == BrowserTab.Favorites)
+			_menuActions.Add(new MenuAction("删除我喜爱的服务器列表中的服务器", RemoveSelectedFromFavorites, has));
+		if (_tab == BrowserTab.History)
+			_menuActions.Add(new MenuAction("从历史记录删除服务器", RemoveSelectedFromHistory, has));
+
+		// 原生 ContextMenu(选中才挂;菜单项禁用态与原版一致)
+		if (_listView == null)
+			return;
+		var menu = new Avalonia.Controls.ContextMenu();
+		foreach (var action in _menuActions)
+		{
+			var captured = action;
+			var item = new Avalonia.Controls.MenuItem
+			{
+				Header = captured.Header,
+				IsEnabled = captured.Enabled,
+			};
+			item.Click += (_, _) => InvokeMenu(captured);
+			menu.Items.Add(item);
+		}
+		_listView.List.ContextMenu = has ? menu : null;
+	}
+
+	void InvokeMenu(MenuAction action)
+	{
+		if (action.Enabled)
+			action.Run();
+	}
+}

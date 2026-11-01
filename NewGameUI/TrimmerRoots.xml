@@ -1,0 +1,14 @@
+<linker>
+	<!-- 只有非 Preview 配置（AOT 插件）才会用到这个文件 -->
+
+	<!-- 窗口类型由 XAML 编译 + avares 运行时加载，成员必须保住 -->
+	<assembly fullname="NewGameUI">
+		<namespace fullname="Plugin.Views" preserve="all" />
+		<namespace fullname="Plugin.RazorPages" preserve="all" />
+	</assembly>
+
+	<!-- 渲染循环是运行时按类型创建的，AOT 下没有静态引用链 -->
+	<assembly fullname="Avalonia.Base">
+		<type fullname="Avalonia.Rendering.DefaultRenderLoop" preserve="all" />
+	</assembly>
+</linker>

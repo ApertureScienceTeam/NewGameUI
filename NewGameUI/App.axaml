@@ -1,0 +1,40 @@
+<Application xmlns="https://github.com/avaloniaui"
+			 xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+			 xmlns:local="using:NewGameUI"
+			 x:Class="NewGameUI.App"
+			 RequestedThemeVariant="Dark">
+
+	<Application.Styles>
+		<!-- 全自主深色设计：交互控件走 Fluent Dark 变体，
+		     调色板（午夜蓝）在 MainMenuWindow.Resources / 各 razor 表单内统一维护 -->
+		<Style Selector="EmbeddableControlRoot">
+			<Setter Property="Background" Value="Transparent"></Setter>
+		</Style>
+	</Application.Styles>
+
+	<!-- Blazonia 托管的 EmbeddableControlRoot 需要 ControlTheme 提供 VisualLayerManager，
+	     否则 ComboBox/菜单等弹层打开时会抛 "no overlay layer is found" -->
+	<Application.Resources>
+		<ResourceDictionary>
+			<ControlTheme x:Key="{x:Type EmbeddableControlRoot}" TargetType="EmbeddableControlRoot">
+				<Setter Property="Foreground" Value="#E9EFF5" />
+				<Setter Property="FontSize" Value="13" />
+				<Setter Property="Template">
+					<ControlTemplate>
+						<Panel>
+							<Border Name="PART_TransparencyFallback" IsHitTestVisible="False" />
+							<Border Background="{TemplateBinding Background}">
+								<VisualLayerManager Name="PART_VisualLayerManager">
+									<ContentPresenter Name="PART_ContentPresenter"
+									                  Margin="{TemplateBinding Padding}"
+									                  Content="{TemplateBinding Content}"
+									                  ContentTemplate="{TemplateBinding ContentTemplate}" />
+								</VisualLayerManager>
+							</Border>
+						</Panel>
+					</ControlTemplate>
+				</Setter>
+			</ControlTheme>
+		</ResourceDictionary>
+	</Application.Resources>
+</Application>
