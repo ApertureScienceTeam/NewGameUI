@@ -22,9 +22,27 @@
    地图：原版 CS 1.6 不跨重启保存（唯一写 CSBotConfig.vdf "map" 的是 CZ 分支），
    这里补上写侧——开局时把 map 写进 cstrike\CSBotConfig.vdf（BotConfigVdf），
    正好复活的是原版构造函数里自己的恢复路径（0x1EEECC 读 "map" 键），原版 UI 可直接读回。
+   Enable Steam Networking 复选框同用这份文件（键 "steamnetworking"）：settings.scr 的
+   SERVER_OPTIONS 里没有它，而 cvar sv_use_steam_networking 只有新引擎注册（Steam 版
+   hw.dll/sw.dll；3266 整套安装里没有任何模块注册它），cvar 当不了跨重启存储。
+   初值优先取这份存档，其次 cvar 当前值，都没有才默认开。
    随机地图：原版下拉第一项是 #GameUI_RandomMap（"< Random Map >"），Start 时
    ServerPage::GetMapString（0x206B0）检测到该选中项就在真实地图里均匀随机取一张，
-   选中态本身不变（常驻对话框继续显示随机地图）；本表单同款实现。 *@
+   选中态本身不变（常驻对话框继续显示随机地图）；本表单同款实现。
+   机器人（第 3 页"机器人"）：原版把 bot 项留在两个地方——服务器页 res 的
+   EnableBotsCheck/BotQuotaCombo/SkillLevel*（3266 的 res 里 visible=1，Steam 的同名
+   res 里全被置 0），以及只有 CZ 才构造的 CCreateMultiplayerGameBotPage（对话框构造
+   函数里 _stricmp(ModData 的 game 标题, "Condition Zero") 不成立就跳过整页）。
+   控件背后那批 cvar 是真能用的：cstrike\dlls\mp.dll 带着完整 CZ bot 模块
+   （bot_quota / bot_difficulty / bot_join_team="any" / bot_chatter="normal" /
+   bot_prefix / bot_join_after_player / bot_auto_vacate / bot_defer_to_human /
+   bot_allow_*，两套安装的 mp.dll 都有）。这里按 CZ bot 页的项做成独立标签页，
+   下拉值用服务器认的字面量，bot_quota 最后下发让服务器按已生效的设置补满名额。
+   bot_* 与 mp_* 一样要等 map 之后才注册，走同一批 wait；跨重启记忆仍写
+   CSBotConfig.vdf（键名 = cvar 名）。#Cstrike_Bot_* 这批 token 两套安装的 cstrike
+   本地化里都没有（原版只显示裸键名），文案直接给中文。
+   注：bot 靠 maps\<地图>.nav 寻路——3266 附了 19 个 nav，Steam 版一个都没有，
+   那种图上加了机器人也不会走位；按要求照常下发、不额外提示。 *@
 <Border Background="@("#161D26")" CornerRadius="12"
         BorderBrush="@("#2A3644")" BorderThickness="1"
         Padding="@("20,12")" Margin="20">
@@ -145,6 +163,62 @@
 				</ScrollViewer>
 			</TabItem>
 
+			<TabItem Header="@("机器人")">
+				<ScrollViewer>
+					<StackPanel Spacing="12" Margin="@("16,16")">
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="机器人数量" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<Slider Minimum="0" Maximum="32" Width="220" @bind-Value="_botQuota" />
+							<TextBlock Text="@BotQuotaText" Width="32" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="机器人难度" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<ComboBox T="string" ItemsSource="@DifficultyLabels" OnSelectionChanged="OnDifficultySelected"
+							          SelectedIndex="@_difficultyIndex" Width="260" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="加入队伍" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<ComboBox T="string" ItemsSource="@TeamLabels" OnSelectionChanged="OnTeamSelected"
+							          SelectedIndex="@_teamIndex" Width="260" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="无线电语音" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<ComboBox T="string" ItemsSource="@ChatterLabels" OnSelectionChanged="OnChatterSelected"
+							          SelectedIndex="@_chatterIndex" Width="260" />
+						</StackPanel>
+
+						<StackPanel Orientation="Orientation.Horizontal" Spacing="12">
+							<TextBlock Text="机器人名字前缀" Width="180" VerticalAlignment="VerticalAlignment.Center"
+							           Foreground="@("#C6D2DD")" />
+							<TextBox @bind-Text="_botPrefix" Width="320" />
+						</StackPanel>
+
+						<CheckBox @bind-IsChecked="_botJoinAfterPlayer">玩家加入后机器人再进场</CheckBox>
+						<CheckBox @bind-IsChecked="_botAutoVacate">玩家不足时机器人自动让位</CheckBox>
+						<CheckBox @bind-IsChecked="_botDeferToHuman">机器人让出装备给玩家</CheckBox>
+
+						<TextBlock Text="允许机器人使用" Foreground="@("#8FA0A8")" Margin="@("0,8,0,0")" />
+						<CheckBox @bind-IsChecked="_botAllowPistols">手枪</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowShotguns">霰弹枪</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowSubMachineGuns">冲锋枪</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowRifles">步枪</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowMachineGuns">机枪</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowSnipers">狙击枪</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowGrenades">手雷</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowShield">盾牌</CheckBox>
+						<CheckBox @bind-IsChecked="_botAllowRogues">允许背叛队友</CheckBox>
+					</StackPanel>
+				</ScrollViewer>
+			</TabItem>
+
 		</TabControl>
 
 		<StackPanel Grid.Row="1" Orientation="Orientation.Horizontal"
@@ -196,14 +270,52 @@
 	string _hostagepenalty = "5";
 	bool? _flashlight = false;
 
+	// —— 机器人（原版 CreateMultiplayerGameBotPage.res + 服务器页的 bot 控件）——
+	// 这些 cvar 全部由 cstrike\dlls\mp.dll 注册（两套安装的 mp.dll 都带完整 CZ bot
+	// 模块：0x115e48 起一段 bot_chatter="normal" / bot_join_team="any" /
+	// bot_allow_*="1" / bot_prefix / bot_quota / bot_difficulty …），
+	// 所以和 mp_* 一样必须等 map 之后才存在
+	double? _botQuota = 0;
+	int _difficultyIndex = 1;
+	int _teamIndex;
+	int _chatterIndex = 2;
+	string _botPrefix = "";
+	bool? _botJoinAfterPlayer = true;
+	bool? _botAutoVacate = true;
+	bool? _botDeferToHuman = true;
+	bool? _botAllowPistols = true;
+	bool? _botAllowShotguns = true;
+	bool? _botAllowSubMachineGuns = true;
+	bool? _botAllowRifles = true;
+	bool? _botAllowMachineGuns = true;
+	bool? _botAllowSnipers = true;
+	bool? _botAllowGrenades = true;
+	bool? _botAllowShield = true;
+	bool? _botAllowRogues = true;
+
 	// LIST 项文案取自 settings.scr 的 token（#Cstrike_Spectate_Anyone 等）官方简体中文
 	static readonly ImmutableArray<string> CameraLabels =
 		new[] { "所有人观看", "只分组观看", "只允许第一人称视角" }.ToImmutableArray();
+
+	// 机器人下拉：文案对应原版 res 的 #Cstrike_Bot_Difficulty0..3、
+	// #CStrike_Bot_JoinTeam、#Cstrike_Bot_Chatter 各项（两套安装的 cstrike 本地化里
+	// 都没有这批 token，原版界面只显示裸键名，这里给中文）；值用服务器认的字面量
+	static readonly ImmutableArray<string> DifficultyLabels =
+		new[] { "新手", "普通", "困难", "专家" }.ToImmutableArray();
+	static readonly ImmutableArray<string> TeamLabels =
+		new[] { "任意", "CT", "恐怖分子" }.ToImmutableArray();
+	static readonly ImmutableArray<string> TeamValues =
+		new[] { "any", "ct", "terrorist" }.ToImmutableArray();
+	static readonly ImmutableArray<string> ChatterLabels =
+		new[] { "关闭", "简短", "正常", "电台" }.ToImmutableArray();
+	static readonly ImmutableArray<string> ChatterValues =
+		new[] { "off", "minimal", "normal", "radio" }.ToImmutableArray();
 
 	string MaxPlayersText => ((int)Math.Round(_maxPlayers ?? 16)).ToString();
 	string RoundTimeText => ((int)Math.Round(_roundtime ?? 5)).ToString();
 	string FreezeTimeText => ((int)Math.Round(_freezetime ?? 6)).ToString();
 	string StartMoneyText => ((int)Math.Round(_startmoney ?? 800)).ToString();
+	string BotQuotaText => ((int)Math.Round(_botQuota ?? 0)).ToString();
 
 	protected override void OnInitialized()
 	{
@@ -217,7 +329,8 @@
 		_maxPlayers = ScrFloat("maxplayers", EngineCommands.GetCvarFloat("maxplayers", 16));
 		if (_maxPlayers < 1 || _maxPlayers > 32)
 			_maxPlayers = 16;
-		_steamNetworking = EngineCommands.GetCvarFloat("sv_use_steam_networking", 1) != 0;
+		_steamNetworking = StoredBool(BotConfigVdf.GetValue("steamnetworking"))
+			?? EngineCommands.GetCvarFloat("sv_use_steam_networking", 1) != 0;
 		_timelimit = NumText(ScrFloat("mp_timelimit", EngineCommands.GetCvarFloat("mp_timelimit", 20)));
 		_winlimit = NumText(ScrFloat("mp_winlimit", EngineCommands.GetCvarFloat("mp_winlimit", 0)));
 		_maxrounds = NumText(ScrFloat("mp_maxrounds", EngineCommands.GetCvarFloat("mp_maxrounds", 0)));
@@ -233,6 +346,51 @@
 		_autokick = ScrFloat("mp_autokick", EngineCommands.GetCvarFloat("mp_autokick", 0)) != 0;
 		_hostagepenalty = NumText(ScrFloat("mp_hostagepenalty", EngineCommands.GetCvarFloat("mp_hostagepenalty", 5)));
 		_flashlight = ScrFloat("mp_flashlight", EngineCommands.GetCvarFloat("mp_flashlight", 0)) != 0;
+		// 机器人：初值取 CSBotConfig.vdf（键名就是对应 cvar 名），其次已开局时的 cvar
+		// 当前值，都没有按 mp.dll 注册时的默认值；默认数量 0 = 不加机器人
+		_botQuota = StoredInt("bot_quota", 0, 0, 32);
+		_difficultyIndex = StoredInt("bot_difficulty", 1, 0, 3);
+		_teamIndex = IndexOfValue(TeamValues, StoredOrCvar("bot_join_team"), 0);
+		_chatterIndex = IndexOfValue(ChatterValues, StoredOrCvar("bot_chatter"), 2);
+		_botPrefix = StoredOrCvar("bot_prefix");
+		_botJoinAfterPlayer = StoredFlag("bot_join_after_player", true);
+		_botAutoVacate = StoredFlag("bot_auto_vacate", true);
+		_botDeferToHuman = StoredFlag("bot_defer_to_human", true);
+		_botAllowPistols = StoredFlag("bot_allow_pistols", true);
+		_botAllowShotguns = StoredFlag("bot_allow_shotguns", true);
+		_botAllowSubMachineGuns = StoredFlag("bot_allow_sub_machine_guns", true);
+		_botAllowRifles = StoredFlag("bot_allow_rifles", true);
+		_botAllowMachineGuns = StoredFlag("bot_allow_machine_guns", true);
+		_botAllowSnipers = StoredFlag("bot_allow_snipers", true);
+		_botAllowGrenades = StoredFlag("bot_allow_grenades", true);
+		_botAllowShield = StoredFlag("bot_allow_shield", true);
+		_botAllowRogues = StoredFlag("bot_allow_rogues", true);
+	}
+
+	/// <summary>机器人项初值：vdf 存档 → cvar 当前值（没存档且已开局时）→ 默认值，并夹到合法区间</summary>
+	int StoredInt(string cvar, int fallback, int min, int max)
+	{
+		var stored = BotConfigVdf.GetValue(cvar);
+		var v = int.TryParse(stored, out var n) ? n : (int)Math.Round(EngineCommands.GetCvarFloat(cvar, fallback));
+		return (int)Clamp(v, min, max);
+	}
+
+	bool StoredFlag(string cvar, bool fallback) =>
+		StoredBool(BotConfigVdf.GetValue(cvar)) ?? EngineCommands.GetCvarFloat(cvar, fallback ? 1 : 0) != 0;
+
+	/// <summary>字符串项：空值（cvar 不存在时引擎返回空）按没有处理</summary>
+	string StoredOrCvar(string cvar)
+	{
+		var stored = BotConfigVdf.GetValue(cvar);
+		if (!string.IsNullOrEmpty(stored))
+			return stored;
+		return EngineCommands.GetCvarString(cvar, "");
+	}
+
+	static int IndexOfValue(ImmutableArray<string> values, string? stored, int fallback)
+	{
+		var i = string.IsNullOrEmpty(stored) ? -1 : values.IndexOf(stored!, StringComparer.OrdinalIgnoreCase);
+		return i < 0 ? fallback : i;
 	}
 
 	/// <summary>settings.scr 存储值解析（原版对话框 Game 页的初值来源）；缺失/非法时用回退值</summary>
@@ -246,6 +404,8 @@
 
 	static string NumText(float v) => v.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
 	static double Clamp(float v, double min, double max) => Math.Min(max, Math.Max(min, v));
+	/// <summary>存档里的 0/1 布尔；缺失或不是 0/1 时返回 null，让调用方继续往下找别的来源</summary>
+	static bool? StoredBool(string? v) => v == "1" ? true : v == "0" ? false : null;
 	static float ParseNum(string? s, float fallback) =>
 		float.TryParse(s, System.Globalization.NumberStyles.Float,
 			System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0 ? v : fallback;
@@ -287,16 +447,23 @@
 
 	void OnMapSelected(Avalonia.Controls.SelectionChangedEventArgs e)
 	{
-		_selectedMap = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+		_selectedMap = SelectedLabel(e);
 	}
 
-	void OnCameraSelected(Avalonia.Controls.SelectionChangedEventArgs e)
-	{
-		var s = e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
-		var i = s == null ? -1 : CameraLabels.IndexOf(s, StringComparer.Ordinal);
-		if (i >= 0)
-			_cameraIndex = i;
-	}
+	static string? SelectedLabel(Avalonia.Controls.SelectionChangedEventArgs e) =>
+		e.AddedItems.Count > 0 ? e.AddedItems[0]?.ToString() : null;
+
+	void OnCameraSelected(Avalonia.Controls.SelectionChangedEventArgs e) =>
+		_cameraIndex = IndexOfValue(CameraLabels, SelectedLabel(e), _cameraIndex);
+
+	void OnDifficultySelected(Avalonia.Controls.SelectionChangedEventArgs e) =>
+		_difficultyIndex = IndexOfValue(DifficultyLabels, SelectedLabel(e), _difficultyIndex);
+
+	void OnTeamSelected(Avalonia.Controls.SelectionChangedEventArgs e) =>
+		_teamIndex = IndexOfValue(TeamLabels, SelectedLabel(e), _teamIndex);
+
+	void OnChatterSelected(Avalonia.Controls.SelectionChangedEventArgs e) =>
+		_chatterIndex = IndexOfValue(ChatterLabels, SelectedLabel(e), _chatterIndex);
 
 	void Start()
 	{
@@ -342,6 +509,16 @@
 		EngineCommands.SetCvarFloat("mp_hostagepenalty", ParseNum(_hostagepenalty, 5));
 		EngineCommands.SetCvarFloat("mp_flashlight", _flashlight == true ? 1 : 0);
 
+		// 机器人：bot_* 也归 mp.dll 注册，跟着上面这批延后到开局之后。
+		// bot_quota 排最后——服务器（CBotManager::Update 每帧补名额）按已生效的
+		// 难度/阵营/武器设置补满；数量为 0 时只关名额，不把十几条 bot_* 刷进控制台
+		foreach (var (cvar, value) in BotSettings())
+		{
+			if (cvar != "bot_quota" && (_botQuota ?? 0) <= 0)
+				continue;
+			EngineCommands.SetCvar(cvar, value);
+		}
+
 		// 与原版一致（WriteGameplaySettings @0x1fef0）：开局时把控件值写回 settings.scr，
 		// 下次创建对话框（含重启游戏）从这里回读——这就是原版“记住上次设置”的全部来源
 		SettingsScr.SetValue("hostname", _hostname?.Trim() ?? "");
@@ -367,5 +544,34 @@
 		// CSBotConfig.vdf 跨重启存解析后的具体地图（原版 CZ 语义——Start 时随机已定型）
 		s_lastMap = _selectedMap;
 		BotConfigVdf.SetValue("map", map);
+		BotConfigVdf.SetValue("steamnetworking", _steamNetworking == true ? "1" : "0");
+		// 机器人记忆：写进原版 bot 配置的同一份文件，键名用 cvar 名，
+		// 与上面下发的表一一对应
+		foreach (var (cvar, value) in BotSettings())
+			BotConfigVdf.SetValue(cvar, value);
 	}
+
+	/// <summary>机器人项 → (cvar 名, 值)；下发和写存档共用这一张表</summary>
+	List<(string Cvar, string Value)> BotSettings() => new()
+	{
+		("bot_difficulty", _difficultyIndex.ToString()),
+		("bot_join_team", TeamValues[_teamIndex]),
+		("bot_chatter", ChatterValues[_chatterIndex]),
+		("bot_prefix", _botPrefix?.Trim() ?? ""),
+		("bot_join_after_player", Bit(_botJoinAfterPlayer)),
+		("bot_auto_vacate", Bit(_botAutoVacate)),
+		("bot_defer_to_human", Bit(_botDeferToHuman)),
+		("bot_allow_pistols", Bit(_botAllowPistols)),
+		("bot_allow_shotguns", Bit(_botAllowShotguns)),
+		("bot_allow_sub_machine_guns", Bit(_botAllowSubMachineGuns)),
+		("bot_allow_rifles", Bit(_botAllowRifles)),
+		("bot_allow_machine_guns", Bit(_botAllowMachineGuns)),
+		("bot_allow_snipers", Bit(_botAllowSnipers)),
+		("bot_allow_grenades", Bit(_botAllowGrenades)),
+		("bot_allow_shield", Bit(_botAllowShield)),
+		("bot_allow_rogues", Bit(_botAllowRogues)),
+		("bot_quota", BotQuotaText),
+	};
+
+	static string Bit(bool? v) => v == true ? "1" : "0";
 }
